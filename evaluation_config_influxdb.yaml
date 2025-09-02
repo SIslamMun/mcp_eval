@@ -1,0 +1,31 @@
+# InfluxDB Configuration for MCP Evaluation
+# Note: This requires a running InfluxDB instance
+
+# Agent configurations
+claude_config:
+  type: "claude"
+  model: "sonnet"
+  output_format: "json"
+  timeout: 60
+  allowed_tools: ["Bash", "Edit", "Read", "Write", "MCP"]
+  dangerously_skip_permissions: true  # For automated evaluation
+
+opencode_config:
+  type: "opencode" 
+  model: "github-copilot/claude-3.5-sonnet"
+  timeout: 60
+  enable_logs: true
+
+# Evaluation settings
+prompts_dir: "prompts"
+db_path: "evaluation_sessions.db"  # Still used as fallback identifier
+timeout_seconds: 60
+max_retries: 3
+session_id_format: "eval_prompt{prompt_id:03d}_{timestamp}"
+
+# InfluxDB configuration
+# To use InfluxDB, first run: ./setup_influxdb.sh
+influxdb_url: "http://localhost:8086"
+influxdb_token: "mcp-evaluation-token"
+influxdb_org: "mcp-evaluation"
+influxdb_bucket: "evaluation-sessions"

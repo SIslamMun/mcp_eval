@@ -1,0 +1,67 @@
+# MCP Evaluation Infrastructure
+[project]
+name = "mcp-evaluation"
+version = "0.1.0"
+description = "MCP evaluation infrastructure supporting Claude Code and OpenCode agents"
+authors = [
+    { name = "MCP Evaluation Team", email = "team@example.com" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+
+dependencies = [
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "jinja2>=3.1.0",
+    "python-frontmatter>=1.0.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "influxdb-client>=1.37.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.0.0",
+]
+influxdb = [
+    "influxdb-client>=1.37.0",
+]
+
+[project.scripts]
+mcp-eval = "mcp_evaluation.cli:main"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
