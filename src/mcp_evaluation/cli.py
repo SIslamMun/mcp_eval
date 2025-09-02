@@ -7,6 +7,7 @@ import sys
 import signal
 from pathlib import Path
 from typing import Optional, List
+from datetime import datetime
 
 import click
 from rich.console import Console
@@ -945,6 +946,7 @@ def _get_model_name(result, multi_result):
             return model
     
     return "unknown"
+
 
 
 if __name__ == "__main__":

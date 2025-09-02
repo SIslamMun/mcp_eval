@@ -16,7 +16,7 @@ import yaml
 from rich.console import Console
 
 from .unified_agent import UnifiedAgent, AgentConfig, AgentResponse
-from .prompt_loader import MarkdownPromptLoader, PromptData
+from .jsonl_prompt_loader import UnifiedPromptLoader, PromptData
 from .session_manager import SessionManager, SessionData, ComparativeSessionData
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ class EvaluationEngine:
         else:
             self.config = EvaluationConfig()
             
-        self.prompt_loader = MarkdownPromptLoader(self.config.prompts_dir)
+        self.prompt_loader = UnifiedPromptLoader(self.config.prompts_dir)
         
         # Create session manager based on backend configuration
         if self.config.backend == "sqlite":

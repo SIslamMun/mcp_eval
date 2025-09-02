@@ -5,7 +5,8 @@ A comprehensive evaluation system for testing MCP (Model Context Protocol) funct
 ## ✨ Key Features
 
 - **⚡ Parallel Multi-Model Execution**: Run multiple models simultaneously for maximum efficiency
-- **🔄 Real-time Progress Tracking**: See exactly which models are processing and completing
+- **� JSONL Prompt System**: Efficient single-file prompt loading from `prompts_dataset.jsonl`
+- **�🔄 Real-time Progress Tracking**: See exactly which models are processing and completing
 - **🧠 Intelligent Model Validation**: Automatic invalid model detection with suggestions
 - **⏱️ Timeout Protection**: 2-minute per-model timeout with graceful shutdown
 - **💰 Cost & Performance Analytics**: Track costs, execution times, and success rates
@@ -60,6 +61,7 @@ uv run python -m mcp_evaluation stats
 - **Stores results** in InfluxDB time-series database
 - **Tracks costs** and execution times
 - **Generates statistics** and analytics
+- **Uses JSONL prompt dataset** for efficient single-file prompt management
 
 ## � Project Structure
 
@@ -69,9 +71,12 @@ uv run python -m mcp_evaluation stats
 │   ├── evaluation_engine.py     # Main evaluation orchestration
 │   ├── session_manager.py       # InfluxDB/SQLite storage
 │   ├── unified_agent.py         # Claude/OpenCode interface
-│   └── prompt_loader.py         # Markdown prompt parser
+│   ├── prompt_loader.py         # Markdown prompt parser (fallback)
+│   └── jsonl_prompt_loader.py   # JSONL prompt system (primary)
 ├── scripts/                     # Setup scripts (InfluxDB, Grafana)
-├── prompts/                     # Test prompts (001.md - 005.md, 999.md)
+├── prompts/                     # Prompt dataset
+│   ├── prompts_dataset.jsonl    # Primary prompt source (7 prompts)
+│   └── backup_old_format/       # Original .md files (backup)
 ├── tests/                       # Unit tests
 ├── docs/                        # Documentation (including FUNCTIONALITY.md)
 └── grafana-mcp-evaluation-dashboard.json  # Grafana dashboard configuration
@@ -263,20 +268,34 @@ Model Performance Summary:
 
 ## � Statistics Dashboard
 
+## � Statistics Dashboard
+
 ```
+📄 Using JSONL prompt source: prompts/prompts_dataset.jsonl
+
 Evaluation Statistics
 ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
 ┃ Metric                ┃ Value   ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
-│ Total Sessions        │ 5       │
-│ Comparative Sessions  │ 2       │
-│ Database Size (MB)    │ 0.04    │
-│ Average Cost (USD)    │ $0.1351 │
+│ Total Sessions        │ 52      │
+│ Comparative Sessions  │ 11      │
+│ Total Prompts         │ 7       │
+│ Database Size (MB)    │ 0.36    │
+│ Recent Sessions (24h) │ 52      │
+│ Average Cost (USD)    │ $0.0913 │
 └───────────────────────┴─────────┘
 
 Agent Distribution:
-• claude: 3 sessions
-• opencode: 2 sessions
+  • claude: 20 sessions
+  • opencode: 32 sessions
+
+Prompt Complexity Distribution:
+  • low: 4 prompts
+  • medium: 2 prompts
+  • high: 1 prompts
+
+MCP Targets (1):
+  • node-hardware-mcp
 ```
 
 ## ⚙️ Configuration
@@ -355,24 +374,31 @@ uv run python -m mcp_evaluation run 1 --backend sqlite --skip-permissions
 ### Custom Config
 Create `evaluation_config_influxdb.yaml` or `evaluation_config_sqlite.yaml` to customize settings.
 
-## 🧪 Creating Test Prompts
+## 📄 JSONL Prompt System
 
-Create `.md` files in `prompts/` directory:
+The system uses a single JSONL file for efficient prompt management:
 
-```markdown
----
-id: 1
-complexity: "low"
-target_mcp: ["node-hardware-mcp"]
-description: "Basic MCP hardware information query"
-timeout: 60
-expected_tools: ["MCP", "Read"]
-tags: ["basic", "discovery"]
----
+**Primary Source:**
+```
+prompts/prompts_dataset.jsonl  # 7 prompts loaded automatically
+```
 
-# Basic MCP Hardware Discovery
+**JSONL Format:**
+```json
+{"id": 1, "name": "001-low-general", "complexity": "low", "category": "general", "target_mcp": ["node-hardware-mcp"], "description": "Basic MCP discovery and hardware information query", "timeout": 60, "expected_tools": ["MCP", "Read"], "tags": ["basic", "discovery", "hardware"], "content": "# Basic MCP Hardware Discovery\n\nPlease discover and use the available MCP servers to gather system information."}
+```
 
-Please discover and use available MCP servers to gather system information.
+**Benefits:**
+- ✅ **Single file** instead of multiple .md files
+- ✅ **Fast loading** with automatic detection
+- ✅ **Fallback support** to .md files if needed
+- ✅ **Rich metadata** with complexity, categories, tags
+- ✅ **7 prompts available** with IDs: [1, 2, 3, 4, 5, 999, 1000]
+
+**Status Check:**
+```bash
+# System automatically shows: "📄 Using JSONL prompt source: prompts/prompts_dataset.jsonl"
+uv run python -m mcp_evaluation stats
 ```
 
 ## 📝 Notes
@@ -383,6 +409,7 @@ Please discover and use available MCP servers to gather system information.
 - **Model validation** provides intelligent suggestions for invalid models
 - **Timeout protection** (2 minutes per model) prevents hanging processes
 - **Real-time progress** shows which models are processing and completing
+- **📄 JSONL prompt system** loads 7 prompts from single dataset file
 - **InfluxDB runs in Docker** (started by `scripts/setup_influxdb.sh`)
 - **Grafana dashboard available** at http://localhost:3000/d/mcp-evaluation-main/mcp-evaluation-system-dashboard (admin/admin)
 - **Data persists** between runs in time-series format
@@ -394,7 +421,8 @@ Please discover and use available MCP servers to gather system information.
 - **Invalid models?** Use `uv run python -m mcp_evaluation models --agent [claude|opencode]`
 - **Need faster testing?** Use `--skip-permissions` for Claude
 - **Timeout issues?** Default 2-minute timeout per model with graceful shutdown
+- **JSONL not loading?** Check for `prompts/prompts_dataset.jsonl` file (auto-detected)
 
 ---
 
-**Fast, parallel, comprehensive MCP testing.** ⚡🚀
+**Fast, parallel, comprehensive MCP testing with JSONL prompt management.** ⚡📄🚀
