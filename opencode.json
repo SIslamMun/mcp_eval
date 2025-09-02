@@ -20,7 +20,7 @@
       "command": [
         "uv",
         "--directory",
-        "/home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/iowarp-hooks/iowarp-mcps/mcps/Node_Hardware",
+        "path/to/iowarp-mcps/mcps/Node_Hardware",
         "run",
         "node-hardware-mcp"
       ],
