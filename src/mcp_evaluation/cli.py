@@ -4,6 +4,7 @@ Command-line interface for MCP evaluation infrastructure.
 
 import json
 import sys
+import signal
 from pathlib import Path
 from typing import Optional, List
 
@@ -19,6 +20,20 @@ from .evaluation_engine import EvaluationConfig
 
 
 console = Console()
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+def signal_handler(signum, frame):
+    """Handle Ctrl+C and other termination signals gracefully."""
+    global shutdown_requested
+    shutdown_requested = True
+    console.print("\n[yellow]⚠️  Shutdown requested. Stopping evaluation...[/yellow]")
+    console.print("[dim]Press Ctrl+C again to force quit[/dim]")
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 
 @click.group()
@@ -86,10 +101,192 @@ def setup(config: Optional[str], prompts_dir: str, db_path: str):
 
 
 @main.command()
+@click.option("--agent", "-a", type=click.Choice(["claude", "opencode", "both"]), default="both", help="Agent to check models for")
+@click.option("--preference", "-p", type=click.Choice(["fast", "accurate", "cheap"]), help="Model preference for suggestions")
+def models(agent: str, preference: Optional[str]):
+    """List available models for agents and get suggestions."""
+    from .unified_agent import UnifiedAgent
+    
+    console.print("[bold blue]Available Models for MCP Evaluation[/bold blue]\n")
+    
+    if agent in ["claude", "both"]:
+        console.print("[bold blue]Claude Models:[/bold blue]")
+        claude_agent = UnifiedAgent("claude")
+        claude_models = claude_agent.get_supported_models()
+        claude_suggestions = claude_agent.suggest_models("claude", preference)
+        
+        claude_table = Table(show_header=True, header_style="bold blue")
+        claude_table.add_column("Model", style="cyan")
+        claude_table.add_column("Status", justify="center")
+        claude_table.add_column("Recommended", justify="center")
+        
+        for model in claude_models:
+            status = "✅ Available"
+            recommended = "⭐" if model in claude_suggestions[:3] else ""
+            claude_table.add_row(model, status, recommended)
+        
+        console.print(claude_table)
+        
+        if preference:
+            console.print(f"[dim]💡 Suggested models for '{preference}' preference: {', '.join(claude_suggestions[:3])}[/dim]")
+        console.print()
+    
+    if agent in ["opencode", "both"]:
+        console.print("[bold green]OpenCode Models:[/bold green]")
+        
+        with console.status("[bold green]Detecting available OpenCode models..."):
+            try:
+                opencode_agent = UnifiedAgent("opencode")
+                opencode_models = opencode_agent.get_supported_models()
+                opencode_suggestions = opencode_agent.suggest_models("opencode", preference)
+                
+                opencode_table = Table(show_header=True, header_style="bold green")
+                opencode_table.add_column("Model", style="cyan")
+                opencode_table.add_column("Provider", style="yellow")
+                opencode_table.add_column("Status", justify="center")
+                opencode_table.add_column("Recommended", justify="center")
+                
+                for model in opencode_models:
+                    provider = "GitHub Copilot" if model.startswith("github-copilot/") else "OpenCode"
+                    status = "✅ Available"
+                    recommended = "⭐" if model in opencode_suggestions[:3] else ""
+                    
+                    # Shorten model name for display
+                    display_model = model.replace("github-copilot/", "")
+                    opencode_table.add_row(display_model, provider, status, recommended)
+                
+                console.print(opencode_table)
+                
+                if preference:
+                    suggested_display = [m.replace("github-copilot/", "") for m in opencode_suggestions[:3]]
+                    console.print(f"[dim]💡 Suggested models for '{preference}' preference: {', '.join(suggested_display)}[/dim]")
+                
+            except Exception as e:
+                console.print(f"[red]❌ Could not detect OpenCode models: {e}[/red]")
+                console.print("[dim]Make sure OpenCode is installed and accessible[/dim]")
+        
+        console.print()
+    
+    # Usage examples
+    console.print("[bold yellow]Usage Examples:[/bold yellow]")
+    console.print("# Run with specific models:")
+    if agent in ["claude", "both"]:
+        console.print("  uv run python -m mcp_evaluation run 1 --agent claude --claude-model haiku")
+    if agent in ["opencode", "both"]:
+        console.print("  uv run python -m mcp_evaluation run 1 --agent opencode --opencode-model gpt-4o")
+    
+    console.print("\n# Multi-model comparison:")
+    if agent in ["claude", "both"]:
+        console.print("  uv run python -m mcp_evaluation run 1 --claude-models 'sonnet,haiku,opus'")
+    if agent in ["opencode", "both"]:
+        console.print("  uv run python -m mcp_evaluation run 1 --opencode-models 'claude-3.5-sonnet,gpt-4o'")
+
+
+@main.command()
+def cleanup():
+    """Clean up any stuck evaluation processes."""
+    import subprocess
+    
+    console.print("[bold yellow]🧹 Cleaning up stuck evaluation processes...[/bold yellow]\n")
+    
+    processes_to_kill = [
+        "mcp_evaluation",
+        "opencode run",
+        "claude --print"
+    ]
+    
+    killed_any = False
+    for process_pattern in processes_to_kill:
+        try:
+            result = subprocess.run(
+                ["pkill", "-f", process_pattern],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                console.print(f"✅ Killed processes matching: {process_pattern}")
+                killed_any = True
+        except Exception as e:
+            console.print(f"[dim]Could not kill {process_pattern}: {e}[/dim]")
+    
+    if not killed_any:
+        console.print("✅ No stuck processes found")
+    else:
+        console.print("\n[green]✅ Cleanup completed[/green]")
+        console.print("[dim]You can now run new evaluations safely[/dim]")
+
+
+@main.command()
+@click.option("--agent", "-a", type=click.Choice(["claude", "opencode"]), default="opencode", help="Agent to test")
+@click.option("--timeout", "-t", default=30, help="Timeout in seconds")
+@click.option("--skip-permissions", is_flag=True, help="Skip Claude permissions (for sandboxes only)")
+def test(agent: str, timeout: int, skip_permissions: bool):
+    """Quick test of agent functionality with timeout."""
+    from .unified_agent import UnifiedAgent
+    import subprocess
+    import time
+    
+    console.print(f"[bold blue]🧪 Testing {agent} agent (timeout: {timeout}s)[/bold blue]\n")
+    
+    try:
+        # Test model detection first
+        if agent == "opencode":
+            with console.status("Detecting OpenCode models..."):
+                test_agent = UnifiedAgent("opencode")
+                models = test_agent.get_supported_models()
+                if models:
+                    console.print(f"✅ Detected {len(models)} models")
+                    suggested_model = models[0]
+                else:
+                    console.print("❌ No models detected")
+                    return
+        else:
+            suggested_model = "sonnet"
+            console.print("✅ Claude models: sonnet, haiku, opus")
+        
+        # Test simple prompt execution
+        console.print(f"🚀 Testing {agent} with model: {suggested_model}")
+        
+        start_time = time.time()
+        
+        # Use subprocess with timeout for the test
+        cmd = [
+            "timeout", str(timeout),
+            "uv", "run", "python", "-m", "mcp_evaluation", 
+            "run", "1", "--agent", agent,
+            f"--{agent}-model", suggested_model
+        ]
+        
+        # Add skip permissions if requested
+        if skip_permissions:
+            cmd.append("--skip-permissions")
+        
+        with console.status(f"Running test evaluation (max {timeout}s)..."):
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        elapsed = time.time() - start_time
+        
+        if result.returncode == 0:
+            console.print(f"✅ Test passed in {elapsed:.1f}s")
+        elif result.returncode == 124:  # timeout
+            console.print(f"⏰ Test timed out after {timeout}s")
+            console.print("[dim]Try: uv run python -m mcp_evaluation cleanup[/dim]")
+        else:
+            console.print(f"❌ Test failed (exit code: {result.returncode})")
+            if result.stderr:
+                console.print(f"[dim]Error: {result.stderr[:200]}...[/dim]")
+        
+    except Exception as e:
+        console.print(f"❌ Test failed with exception: {e}")
+
+
+@main.command()
 @click.argument("prompt_id", type=int)
 @click.option("--agent", "-a", type=click.Choice(["claude", "opencode", "both"]), default="both", help="Agent to use")
 @click.option("--claude-model", default="sonnet", help="Claude model")
 @click.option("--opencode-model", default="github-copilot/claude-3.5-sonnet", help="OpenCode model")
+@click.option("--claude-models", help="Multiple Claude models (comma-separated): sonnet,haiku,opus")
+@click.option("--opencode-models", help="Multiple OpenCode models (comma-separated): github-copilot/claude-3.5-sonnet,mistral:latest")
 @click.option("--config", "-c", help="Configuration file path")
 @click.option("--backend", "-b", type=click.Choice(["influxdb", "sqlite"]), default="influxdb", help="Database backend (default: influxdb)")
 @click.option("--continue-session", is_flag=True, help="Continue previous session")
@@ -99,6 +296,8 @@ def run(
     agent: str,
     claude_model: str,
     opencode_model: str,
+    claude_models: Optional[str],
+    opencode_models: Optional[str],
     config: Optional[str],
     backend: str,
     continue_session: bool,
@@ -115,20 +314,107 @@ def run(
         from .evaluation_engine import EvaluationConfig
         config_obj = EvaluationConfig(backend=backend)
         engine = EvaluationEngine(config=config_obj)
+
+    # Validate models and provide suggestions
+    from .unified_agent import UnifiedAgent
     
+    def validate_and_suggest_models(agent_type: str, model_list: List[str]) -> List[str]:
+        """Validate models and suggest alternatives if needed."""
+        try:
+            agent = UnifiedAgent(agent_type)
+            supported = agent.get_supported_models()
+            valid_models = []
+            invalid_models = []
+            
+            for model in model_list:
+                if agent.validate_model(model):
+                    valid_models.append(model)
+                else:
+                    invalid_models.append(model)
+            
+            if invalid_models:
+                console.print(f"[red]❌ Invalid {agent_type} models (skipping): {invalid_models}[/red]")
+                suggestions = agent.suggest_models(agent_type)
+                console.print(f"[dim]💡 Suggested {agent_type} models: {suggestions[:3]}[/dim]")
+                console.print(f"[dim]   Use 'uv run python -m mcp_evaluation models --agent {agent_type}' for full list[/dim]")
+                
+            if not valid_models:
+                console.print(f"[red]❌ No valid {agent_type} models provided. Using default.[/red]")
+                default_model = agent.capabilities.default_model
+                if default_model and agent.validate_model(default_model):
+                    return [default_model]
+                else:
+                    suggestions = agent.suggest_models(agent_type)
+                    return suggestions[:1] if suggestions else []
+            
+            return valid_models
+        except Exception as e:
+            console.print(f"[dim]Could not validate {agent_type} models: {e}[/dim]")
+            return model_list
+
     try:
-        if agent == "both":
-            # Comparative evaluation
+        # Check for multi-model instances
+        if claude_models or opencode_models:
+            # Multi-model instance evaluation
+            console.print("[bold yellow]Multi-model instance evaluation detected[/bold yellow]\n")
+            
+            claude_model_list = []
+            opencode_model_list = []
+            
+            if claude_models:
+                claude_model_list = [m.strip() for m in claude_models.split(",")]
+                claude_model_list = validate_and_suggest_models("claude", claude_model_list)
+                if claude_model_list:
+                    console.print(f"✅ Claude models to process: {claude_model_list}")
+                else:
+                    console.print("[red]❌ No valid Claude models found[/red]")
+            elif agent in ["claude", "both"]:
+                claude_model_list = validate_and_suggest_models("claude", [claude_model])
+                
+            if opencode_models:
+                opencode_model_list = [m.strip() for m in opencode_models.split(",")]
+                opencode_model_list = validate_and_suggest_models("opencode", opencode_model_list)
+                if opencode_model_list:
+                    console.print(f"✅ OpenCode models to process: {opencode_model_list}")
+                else:
+                    console.print("[red]❌ No valid OpenCode models found[/red]")
+            elif agent in ["opencode", "both"]:
+                opencode_model_list = validate_and_suggest_models("opencode", [opencode_model])
+            
+            # Check if we have any valid models to run
+            if agent in ["claude", "both"] and not claude_model_list:
+                console.print("[red]❌ No valid Claude models to run[/red]")
+                return
+            if agent in ["opencode", "both"] and not opencode_model_list:
+                console.print("[red]❌ No valid OpenCode models to run[/red]")
+                return
+                
+            result = engine.execute_multi_model_evaluation(
+                prompt_id=prompt_id,
+                claude_models=claude_model_list if agent in ["claude", "both"] else [],
+                opencode_models=opencode_model_list if agent in ["opencode", "both"] else [],
+                continue_session=continue_session,
+                skip_permissions=skip_permissions
+            )
+            
+            # Display multi-model results
+            display_multi_model_result(result)
+            
+        elif agent == "both":
+            # Comparative evaluation - validate both models
+            validated_claude = validate_and_suggest_models("claude", [claude_model])
+            validated_opencode = validate_and_suggest_models("opencode", [opencode_model])
+            
             claude_config = {
                 "type": "claude",
-                "model": claude_model,
+                "model": validated_claude[0] if validated_claude else claude_model,
                 "continue_session": continue_session,
                 "dangerously_skip_permissions": skip_permissions
             }
             
             opencode_config = {
-                "type": "opencode",
-                "model": opencode_model,
+                "type": "opencode", 
+                "model": validated_opencode[0] if validated_opencode else opencode_model,
                 "continue_session": continue_session,
                 "enable_logs": True
             }
@@ -143,10 +429,14 @@ def run(
             display_comparative_result(result)
             
         else:
-            # Single agent evaluation
+            # Single agent evaluation - validate models
+            selected_model = claude_model if agent == "claude" else opencode_model
+            validated_models = validate_and_suggest_models(agent, [selected_model])
+            validated_model = validated_models[0] if validated_models else selected_model
+            
             agent_config = {
                 "type": agent,
-                "model": claude_model if agent == "claude" else opencode_model,
+                "model": validated_model,
                 "continue_session": continue_session
             }
             
@@ -569,6 +859,92 @@ def display_comparative_result(result):
         
         if result.claude_result.cost_usd > 0:
             console.print(f"💰 Claude Code cost: ${result.claude_result.cost_usd:.4f}")
+
+
+def display_multi_model_result(result):
+    """Display a multi-model evaluation result."""
+    console.print(f"[bold]Multi-Model Evaluation - Prompt {result.prompt_id}[/bold]")
+    console.print(f"[cyan]Base Session ID:[/cyan] {result.base_session_id}")
+    console.print(f"[cyan]Total Cost:[/cyan] ${result.total_cost_usd:.4f}")
+    console.print(f"[cyan]Total Duration:[/cyan] {result.total_duration_ms}ms")
+    console.print()
+    
+    # Display Claude model results
+    if result.claude_results:
+        console.print("[bold blue]Claude Model Results:[/bold blue]")
+        
+        claude_table = Table(show_header=True, header_style="bold blue")
+        claude_table.add_column("Model", style="cyan")
+        claude_table.add_column("Status", justify="center")
+        claude_table.add_column("Cost", justify="right")
+        claude_table.add_column("Duration", justify="right")
+        claude_table.add_column("Response Preview", style="dim")
+        
+        for model, model_result in result.claude_results.items():
+            status = "✅ Success" if model_result.success else "❌ Failed"
+            cost = f"${model_result.cost_usd:.4f}"
+            duration = f"{model_result.duration_ms}ms"
+            preview = (model_result.response[:60] + "...") if len(model_result.response) > 60 else model_result.response
+            
+            claude_table.add_row(model, status, cost, duration, preview)
+        
+        console.print(claude_table)
+        console.print()
+    
+    # Display OpenCode model results
+    if result.opencode_results:
+        console.print("[bold green]OpenCode Model Results:[/bold green]")
+        
+        opencode_table = Table(show_header=True, header_style="bold green")
+        opencode_table.add_column("Model", style="cyan")
+        opencode_table.add_column("Status", justify="center")
+        opencode_table.add_column("Cost", justify="right")
+        opencode_table.add_column("Duration", justify="right")
+        opencode_table.add_column("Response Preview", style="dim")
+        
+        for model, model_result in result.opencode_results.items():
+            status = "✅ Success" if model_result.success else "❌ Failed"
+            cost = f"${model_result.cost_usd:.4f}"
+            duration = f"{model_result.duration_ms}ms"
+            preview = (model_result.response[:60] + "...") if len(model_result.response) > 60 else model_result.response
+            
+            opencode_table.add_row(model, status, cost, duration, preview)
+        
+        console.print(opencode_table)
+        console.print()
+    
+    # Summary comparison across models
+    all_results = list(result.claude_results.values()) + list(result.opencode_results.values())
+    successful_results = [r for r in all_results if r.success]
+    
+    if successful_results:
+        console.print("[bold yellow]Model Performance Summary:[/bold yellow]")
+        
+        # Find fastest and cheapest
+        fastest = min(successful_results, key=lambda x: x.duration_ms)
+        cheapest = min(successful_results, key=lambda x: x.cost_usd) if any(r.cost_usd > 0 for r in successful_results) else None
+        
+        console.print(f"🏃 Fastest: {fastest.agent_type} ({_get_model_name(fastest, result)}) - {fastest.duration_ms}ms")
+        if cheapest and cheapest.cost_usd > 0:
+            console.print(f"💰 Cheapest: {cheapest.agent_type} ({_get_model_name(cheapest, result)}) - ${cheapest.cost_usd:.4f}")
+        
+        success_rate = len(successful_results) / len(all_results) * 100
+        console.print(f"📊 Success Rate: {success_rate:.1f}% ({len(successful_results)}/{len(all_results)})")
+
+
+def _get_model_name(result, multi_result):
+    """Helper to get model name from result."""
+    # Check Claude models
+    for model, model_result in multi_result.claude_results.items():
+        if model_result == result:
+            return model
+    
+    # Check OpenCode models
+    for model, model_result in multi_result.opencode_results.items():
+        if model_result == result:
+            return model
+    
+    return "unknown"
 
 
 if __name__ == "__main__":

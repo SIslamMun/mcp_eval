@@ -1,6 +1,16 @@
 # MCP Evaluation System
 
-A simple evaluation system for testing MCP (Model Context Protocol) functionality with Claude and OpenCode agents.
+A comprehensive evaluation system for testing MCP (Model Context Protocol) functionality with Claude and OpenCode agents, featuring **parallel multi-model execution** for performance comparison.
+
+## ✨ Key Features
+
+- **⚡ Parallel Multi-Model Execution**: Run multiple models simultaneously for maximum efficiency
+- **🔄 Real-time Progress Tracking**: See exactly which models are processing and completing
+- **🧠 Intelligent Model Validation**: Automatic invalid model detection with suggestions
+- **⏱️ Timeout Protection**: 2-minute per-model timeout with graceful shutdown
+- **💰 Cost & Performance Analytics**: Track costs, execution times, and success rates
+- **🛠️ Robust Error Handling**: Comprehensive cleanup and troubleshooting tools
+- **📊 Rich Console Output**: Color-coded progress indicators and detailed summaries
 
 ## 🚀 Quick Start
 
@@ -22,9 +32,19 @@ uv sync
 ```
 
 ### 4. Run Evaluations
+
+**Basic Command Structure:**
+```bash
+uv run python -m mcp_evaluation <COMMAND> [ARGUMENTS] [OPTIONS]
+```
+
+**Quick Examples:**
 ```bash
 # Run single prompt with both agents
 uv run python -m mcp_evaluation run 1 --agent both --skip-permissions
+
+# Run parallel multi-model comparison 🚀 NEW!
+uv run python -m mcp_evaluation run 1 --claude-models sonnet,haiku --opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o --skip-permissions
 
 # Run all prompts with both agents
 uv run python -m mcp_evaluation run-all --agent both --skip-permissions
@@ -59,7 +79,38 @@ uv run python -m mcp_evaluation stats
 
 ## 🔧 Commands
 
-### Single Evaluations
+### 🆕 Parallel Multi-Model Execution (Recommended!)
+
+**Command Template:**
+```bash
+uv run python -m mcp_evaluation run <PROMPT_ID> [--claude-models MODEL1,MODEL2,...] [--opencode-models MODEL1,MODEL2,...] [--skip-permissions]
+```
+
+**Examples:**
+```bash
+# Multiple Claude models in parallel
+uv run python -m mcp_evaluation run 1 --claude-models sonnet,haiku,opus --skip-permissions
+
+# Multiple OpenCode models in parallel
+uv run python -m mcp_evaluation run 1 --opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o,github-copilot/claude-3.7-sonnet-thought
+
+# Mixed parallel execution (both Claude and OpenCode with multiple models)
+uv run python -m mcp_evaluation run 1 --claude-models sonnet,haiku --opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o --skip-permissions
+
+# Check available models
+uv run python -m mcp_evaluation models --agent claude
+uv run python -m mcp_evaluation models --agent opencode
+uv run python -m mcp_evaluation models  # Both agents
+```
+
+### Single Model Evaluations
+
+**Command Template:**
+```bash
+uv run python -m mcp_evaluation run <PROMPT_ID> --agent <claude|opencode|both> [--claude-model <MODEL>] [--opencode-model <MODEL>] [--skip-permissions]
+```
+
+**Examples:**
 ```bash
 # Both agents (default models)
 uv run python -m mcp_evaluation run 1 --agent both --skip-permissions
@@ -76,6 +127,13 @@ uv run python -m mcp_evaluation run 1 --agent opencode --opencode-model "github-
 ```
 
 ### Model Selection
+
+**Command Template:**
+```bash
+uv run python -m mcp_evaluation run <PROMPT_ID> --agent <claude|opencode|both> [--claude-model <sonnet|haiku|opus>] [--opencode-model "<MODEL_NAME>"] [--skip-permissions]
+```
+
+**Examples:**
 ```bash
 # Available Claude models: sonnet, haiku, opus
 uv run python -m mcp_evaluation run 1 --agent claude --claude-model haiku --skip-permissions
@@ -92,6 +150,17 @@ uv run python -m mcp_evaluation run 1 --agent both --claude-model opus --opencod
 ```
 
 ### Batch Evaluations
+
+**Command Templates:**
+```bash
+# Run all prompts
+uv run python -m mcp_evaluation run-all --agent <claude|opencode|both> [--claude-model <MODEL>] [--opencode-model <MODEL>] [--skip-permissions]
+
+# Run specific prompts
+uv run python -m mcp_evaluation batch <PROMPT_ID1> <PROMPT_ID2> ... --agent <claude|opencode|both> [OPTIONS]
+```
+
+**Examples:**
 ```bash
 # All prompts (default models)
 uv run python -m mcp_evaluation run-all --agent both --skip-permissions
@@ -103,35 +172,93 @@ uv run python -m mcp_evaluation run-all --agent both --claude-model haiku --open
 uv run python -m mcp_evaluation batch 1 2 3 --agent both --claude-model opus --opencode-model "opencode/llama-3.1-70b" --skip-permissions
 ```
 
+### Testing & Troubleshooting
+
+**Command Templates:**
+```bash
+# Quick test
+uv run python -m mcp_evaluation test --agent <claude|opencode> [--timeout <SECONDS>] [--skip-permissions]
+
+# Clean up processes
+uv run python -m mcp_evaluation cleanup
+
+# List available models
+uv run python -m mcp_evaluation models [--agent <claude|opencode>]
+```
+
+**Examples:**
+```bash
+# Quick test with timeout
+uv run python -m mcp_evaluation test --agent opencode --timeout 30
+uv run python -m mcp_evaluation test --agent claude --timeout 60 --skip-permissions
+
+# Clean up stuck processes
+uv run python -m mcp_evaluation cleanup
+
+# List available models
+uv run python -m mcp_evaluation models --agent opencode
+```
+
 ### Statistics & Analysis
+
+**Command Templates:**
+```bash
+# View statistics
+uv run python -m mcp_evaluation stats [--backend <influxdb|sqlite>]
+
+# Export results
+uv run python -m mcp_evaluation export [--format <json|csv>] [--output <FILE>]
+
+# View specific results
+uv run python -m mcp_evaluation results <PROMPT_ID> [--backend <influxdb|sqlite>]
+```
+
+**Examples:**
 ```bash
 # View statistics
 uv run python -m mcp_evaluation stats
 
 # Use SQLite instead of InfluxDB
 uv run python -m mcp_evaluation stats --backend sqlite
+
+# Export results to JSON
+uv run python -m mcp_evaluation export --format json --output results.json
+
+# View results for prompt 1
+uv run python -m mcp_evaluation results 1
 ```
 
-## 🎯 Example Output
+## 🎯 Example Output (Parallel Multi-Model)
 
 ```
-Comparative Evaluation - Prompt 1
-Session ID: eval_prompt001_1756832005
+Running evaluation for prompt 1
 
-Claude Code Result:
-✅ Success: True
-Response: ## System Hardware Discovery Summary...
-Cost: $0.1351
-Duration: 37.8s
+Multi-model instance evaluation detected
 
-OpenCode Result:  
-✅ Success: True
-Response: Key system information summary...
-Duration: 29.7s
+✅ Claude models to process: ['sonnet', 'haiku']
+✅ OpenCode models to process: ['github-copilot/claude-3.5-sonnet', 'github-copilot/gpt-4o']
 
-Comparison Summary:
-✅ Both agents succeeded
-💰 Claude Code cost: $0.1351
+🚀 Starting Claude evaluation with 2 models (parallel)...
+🚀 Starting OpenCode evaluation with 2 models (parallel)...
+⚡ Running 4 models with 4 parallel workers...
+
+📍 Processing Claude model 1/2: sonnet
+📍 Processing Claude model 2/2: haiku  
+📍 Processing Opencode model 1/2: claude-3.5-sonnet
+📍 Processing Opencode model 2/2: gpt-4o
+✅ Success Opencode claude-3.5-sonnet: 8000ms
+✅ Success Claude haiku: 8200ms
+✅ Success Claude sonnet: 8500ms  
+✅ Success Opencode gpt-4o: 9100ms
+
+📊 Parallel Execution Summary:
+  ✅ Successful models: 4/4
+  ⚡ Parallel speedup achieved!
+  💰 Total cost: $0.0847
+
+Model Performance Summary:
+🏃 Fastest: opencode (github-copilot/claude-3.5-sonnet) - 8000ms
+📊 Success Rate: 100.0% (4/4)
 ```
 
 ## � Statistics Dashboard
@@ -154,21 +281,68 @@ Agent Distribution:
 
 ## ⚙️ Configuration
 
-### Model Options
+### 🆕 Multi-Model Options
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `--claude-models` | Multiple Claude models (comma-separated) | `--claude-models sonnet,haiku,opus` |
+| `--opencode-models` | Multiple OpenCode models (comma-separated) | `--opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o` |
+| `--skip-permissions` | Skip Claude permission dialogs | `--skip-permissions` |
+
+### Single Model Options
 
 | Agent | Available Models | Example Usage |
 |-------|------------------|---------------|
 | **Claude** | `sonnet` (default), `haiku`, `opus` | `--claude-model haiku` |
-| **OpenCode** | `github-copilot/claude-3.5-sonnet` (default)<br>`github-copilot/gpt-4o`<br>`opencode/llama-3.1-70b` | `--opencode-model "github-copilot/gpt-4o"` |
+| **OpenCode** | `github-copilot/claude-3.5-sonnet` (default)<br>`github-copilot/gpt-4o`<br>`github-copilot/claude-3.7-sonnet-thought`<br>`github-copilot/o1-mini` | `--opencode-model "github-copilot/gpt-4o"` |
 
-### Both Agents Example
+### Multi-Model Comparison Examples
+
+**Command Template:**
 ```bash
-# Compare Claude Haiku vs GPT-4o
-uv run python -m mcp_evaluation run 1 --agent both --claude-model haiku --opencode-model "github-copilot/gpt-4o" --skip-permissions
-
-# Compare Claude Sonnet vs Llama 3.1
-uv run python -m mcp_evaluation run 1 --agent both --claude-model sonnet --opencode-model "opencode/llama-3.1-70b" --skip-permissions
+uv run python -m mcp_evaluation run <PROMPT_ID> [--claude-models <MODEL1,MODEL2,...>] [--opencode-models <MODEL1,MODEL2,...>] [--skip-permissions]
 ```
+
+**Examples:**
+```bash
+# Performance comparison across Claude models
+uv run python -m mcp_evaluation run 1 --claude-models sonnet,haiku,opus --skip-permissions
+
+# OpenCode model comparison  
+uv run python -m mcp_evaluation run 1 --opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o,github-copilot/claude-3.7-sonnet-thought
+
+# Cross-platform comparison (recommended for comprehensive evaluation)
+uv run python -m mcp_evaluation run 1 --claude-models sonnet,haiku --opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o --skip-permissions
+```
+
+## 📋 Command Reference
+
+| Command | Purpose | Template |
+|---------|---------|----------|
+| `run` | Execute single prompt evaluation | `run <ID> --agent <TYPE> [OPTIONS]` |
+| `run-all` | Execute all available prompts | `run-all --agent <TYPE> [OPTIONS]` |
+| `batch` | Execute specific prompts | `batch <ID1> <ID2> ... --agent <TYPE> [OPTIONS]` |
+| `models` | List available models | `models [--agent <TYPE>]` |
+| `test` | Quick functionality test | `test --agent <TYPE> [--timeout <SEC>]` |
+| `cleanup` | Clean stuck processes | `cleanup` |
+| `stats` | View evaluation statistics | `stats [--backend <TYPE>]` |
+| `results` | View specific results | `results <ID> [--backend <TYPE>]` |
+| `export` | Export evaluation data | `export [--format <TYPE>] [--output <FILE>]` |
+| `setup` | Initialize infrastructure | `setup [--backend <TYPE>]` |
+
+### Common Arguments
+
+| Argument | Description | Values | Example |
+|----------|-------------|--------|---------|
+| `--agent` | Choose evaluation agent | `claude`, `opencode`, `both` | `--agent both` |
+| `--claude-model` | Single Claude model | `sonnet`, `haiku`, `opus` | `--claude-model haiku` |
+| `--opencode-model` | Single OpenCode model | `github-copilot/MODEL` | `--opencode-model "github-copilot/gpt-4o"` |
+| `--claude-models` | Multiple Claude models | Comma-separated list | `--claude-models sonnet,haiku` |
+| `--opencode-models` | Multiple OpenCode models | Comma-separated list | `--opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o` |
+| `--skip-permissions` | Skip Claude permissions | Flag (no value) | `--skip-permissions` |
+| `--backend` | Database backend | `influxdb`, `sqlite` | `--backend sqlite` |
+| `--timeout` | Test timeout in seconds | Integer | `--timeout 60` |
+| `--continue-session` | Continue previous session | Flag (no value) | `--continue-session` |
 
 ### Default (InfluxDB)
 No configuration needed! Uses InfluxDB by default.
@@ -204,12 +378,23 @@ Please discover and use available MCP servers to gather system information.
 ## 📝 Notes
 
 - **Claude requires `--skip-permissions`** for automated evaluation
-- **OpenCode is free** to use
+- **OpenCode is free** to use  
+- **⚡ Parallel execution** automatically optimizes performance with ThreadPoolExecutor
+- **Model validation** provides intelligent suggestions for invalid models
+- **Timeout protection** (2 minutes per model) prevents hanging processes
+- **Real-time progress** shows which models are processing and completing
 - **InfluxDB runs in Docker** (started by `scripts/setup_influxdb.sh`)
 - **Grafana dashboard available** at http://localhost:3000/d/mcp-evaluation-main/mcp-evaluation-system-dashboard (admin/admin)
 - **Data persists** between runs in time-series format
 - **Session IDs** link comparative evaluations
 
+### 🔧 Troubleshooting
+
+- **Process stuck?** Use `uv run python -m mcp_evaluation cleanup`
+- **Invalid models?** Use `uv run python -m mcp_evaluation models --agent [claude|opencode]`
+- **Need faster testing?** Use `--skip-permissions` for Claude
+- **Timeout issues?** Default 2-minute timeout per model with graceful shutdown
+
 ---
 
-**Simple, fast, effective MCP testing.** 🚀
+**Fast, parallel, comprehensive MCP testing.** ⚡🚀

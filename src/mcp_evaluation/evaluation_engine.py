@@ -8,15 +8,22 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from pydantic import BaseModel
 import yaml
+from rich.console import Console
 
 from .unified_agent import UnifiedAgent, AgentConfig, AgentResponse
 from .prompt_loader import MarkdownPromptLoader, PromptData
 from .session_manager import SessionManager, SessionData, ComparativeSessionData
 
 logger = logging.getLogger(__name__)
+console = Console()
+
+# Thread-local storage for progress updates
+thread_local = threading.local()
 
 
 class EvaluationConfig(BaseModel):
@@ -80,6 +87,19 @@ class ComparativeEvaluationResult(BaseModel):
     claude_result: Optional[EvaluationResult]
     opencode_result: Optional[EvaluationResult]
     success: bool
+    timestamp: int
+
+
+class MultiModelEvaluationResult(BaseModel):
+    """Result of multi-model evaluation with multiple instances per agent type."""
+    
+    prompt_id: int
+    base_session_id: str
+    claude_results: Dict[str, EvaluationResult]  # model_name -> result
+    opencode_results: Dict[str, EvaluationResult]  # model_name -> result
+    success: bool
+    total_cost_usd: float
+    total_duration_ms: int
     timestamp: int
 
 
@@ -318,6 +338,188 @@ class EvaluationEngine:
             success=claude_result.success or opencode_result.success,
             timestamp=timestamp
         )
+    
+    def execute_multi_model_evaluation(
+        self,
+        prompt_id: int,
+        claude_models: List[str] = None,
+        opencode_models: List[str] = None,
+        continue_session: bool = False,
+        skip_permissions: bool = False
+    ) -> MultiModelEvaluationResult:
+        """
+        Execute evaluation with multiple model instances for the same agent type.
+        
+        Args:
+            prompt_id: Prompt identifier
+            claude_models: List of Claude models to test
+            opencode_models: List of OpenCode models to test
+            continue_session: Whether to continue previous session
+            skip_permissions: Skip Claude permissions (for sandboxes only)
+            
+        Returns:
+            MultiModelEvaluationResult with results for all model instances
+        """
+        # Generate base session ID for all instances
+        timestamp = int(time.time())
+        base_session_id = f"multi_eval_prompt{prompt_id:03d}_{timestamp}"
+        
+        claude_results = {}
+        opencode_results = {}
+        total_cost = 0.0
+        total_duration = 0
+        
+        # Prepare all models for parallel execution
+        all_tasks = []
+        
+        if claude_models:
+            console.print(f"\n[bold blue]🚀 Starting Claude evaluation with {len(claude_models)} models (parallel)...[/bold blue]")
+            for i, model in enumerate(claude_models, 1):
+                all_tasks.append(("claude", model, i, len(claude_models)))
+        
+        if opencode_models:
+            console.print(f"\n[bold green]� Starting OpenCode evaluation with {len(opencode_models)} models (parallel)...[/bold green]")
+            for i, model in enumerate(opencode_models, 1):
+                all_tasks.append(("opencode", model, i, len(opencode_models)))
+        
+        # Execute all models in parallel
+        if all_tasks:
+            max_workers = min(len(all_tasks), 4)  # Limit concurrent executions to 4
+            console.print(f"[dim]⚡ Running {len(all_tasks)} models with {max_workers} parallel workers...[/dim]\n")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_info = {}
+                for agent_type, model, model_index, total_models in all_tasks:
+                    future = executor.submit(
+                        self._execute_single_model,
+                        agent_type, model, prompt_id, base_session_id,
+                        continue_session, skip_permissions,
+                        model_index, total_models
+                    )
+                    future_to_info[future] = (agent_type, model)
+                
+                # Process completed tasks
+                for future in as_completed(future_to_info):
+                    agent_type, original_model = future_to_info[future]
+                    
+                    try:
+                        model, result = future.result()
+                        
+                        if agent_type == "claude":
+                            claude_results[model] = result
+                        else:
+                            opencode_results[model] = result
+                            
+                        total_cost += result.cost_usd
+                        total_duration += result.duration_ms
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {agent_type} model {original_model}: {e}")
+        
+        # Check overall success
+        success = any(r.success for r in claude_results.values()) or any(r.success for r in opencode_results.values())
+        
+        # Summary
+        total_models = len(claude_results) + len(opencode_results)
+        successful_models = sum(1 for r in claude_results.values() if r.success) + sum(1 for r in opencode_results.values() if r.success)
+        
+        if total_models > 0:
+            console.print(f"\n[bold]📊 Parallel Execution Summary:[/bold]")
+            console.print(f"  ✅ Successful models: {successful_models}/{total_models}")
+            console.print(f"  ⚡ Parallel speedup achieved!")
+            if total_cost > 0:
+                console.print(f"  💰 Total cost: ${total_cost:.4f}")
+        
+        logger.info(f"Multi-model evaluation completed. Claude: {len(claude_results)}, OpenCode: {len(opencode_results)}")
+        
+        return MultiModelEvaluationResult(
+            prompt_id=prompt_id,
+            base_session_id=base_session_id,
+            claude_results=claude_results,
+            opencode_results=opencode_results,
+            success=success,
+            total_cost_usd=total_cost,
+            total_duration_ms=total_duration,
+            timestamp=int(time.time())
+        )
+    
+    def _execute_single_model(
+        self, 
+        agent_type: str, 
+        model: str, 
+        prompt_id: int, 
+        base_session_id: str,
+        continue_session: bool = False,
+        skip_permissions: bool = False,
+        model_index: int = 1,
+        total_models: int = 1
+    ) -> tuple[str, EvaluationResult]:
+        """
+        Execute evaluation for a single model. Used for parallel execution.
+        
+        Returns:
+            Tuple of (model_name, EvaluationResult)
+        """
+        try:
+            # Progress update
+            display_model = model.replace('github-copilot/', '')
+            console.print(f"[{'blue' if agent_type == 'claude' else 'green'}]📍 Processing {agent_type.title()} model {model_index}/{total_models}: {display_model}[/{'blue' if agent_type == 'claude' else 'green'}]")
+            
+            if agent_type == "claude":
+                config = {
+                    "type": "claude",
+                    "model": model,
+                    "continue_session": continue_session,
+                    "output_format": "json",
+                    "dangerously_skip_permissions": skip_permissions
+                }
+            else:  # opencode
+                config = {
+                    "type": "opencode",
+                    "model": model,
+                    "continue_session": continue_session,
+                    "enable_logs": True
+                }
+            
+            model_session_id = f"{base_session_id}_{agent_type}_{model.replace('/', '_').replace(':', '_')}"
+            
+            start_time = time.time()
+            result = self.execute_evaluation(
+                prompt_id=prompt_id,
+                agent_config=config,
+                base_session_id=model_session_id
+            )
+            duration = int((time.time() - start_time) * 1000)
+            
+            # Update result with actual duration
+            result.duration_ms = duration
+            
+            status = "✅ Success" if result.success else "❌ Failed"
+            console.print(f"[{'blue' if agent_type == 'claude' else 'green'}]{status} {agent_type.title()} {display_model}: {result.duration_ms}ms[/{'blue' if agent_type == 'claude' else 'green'}]")
+            
+            return model, result
+            
+        except Exception as e:
+            logger.error(f"Failed to execute {agent_type} with model {model}: {e}")
+            display_model = model.replace('github-copilot/', '')
+            console.print(f"[red]❌ Failed {agent_type.title()} {display_model}: {str(e)[:50]}...[/red]")
+            
+            # Create a failed result
+            failed_result = EvaluationResult(
+                prompt_id=prompt_id,
+                base_session_id=f"{base_session_id}_{agent_type}_{model}",
+                agent_type=agent_type,
+                success=False,
+                response="",
+                session_id=None,
+                cost_usd=0.0,
+                duration_ms=0,
+                tokens={},
+                error_message=str(e),
+                timestamp=int(time.time())
+            )
+            return model, failed_result
     
     def execute_batch_evaluation(
         self,

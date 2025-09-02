@@ -9,10 +9,13 @@ import subprocess
 import time
 import uuid
 import hashlib
+import logging
 from typing import Dict, List, Optional, Union, Any
 from pathlib import Path
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class AgentCapabilities(BaseModel):
@@ -78,6 +81,97 @@ class UnifiedAgent:
     with consistent session management and response normalization.
     """
     
+    @staticmethod
+    def get_available_opencode_models() -> List[str]:
+        """
+        Dynamically detect available OpenCode models from the system.
+        
+        Returns:
+            List of available OpenCode models
+        """
+        try:
+            result = subprocess.run(
+                ["opencode", "models"], 
+                capture_output=True, 
+                text=True, 
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                models = []
+                for line in result.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line and not line.startswith('opencode/') and not line.startswith('ollama/'):
+                        # Filter out local/ollama models, keep github-copilot and opencode models
+                        if line.startswith('github-copilot/') or line.startswith('opencode/'):
+                            models.append(line)
+                
+                if models:
+                    return models
+                    
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError) as e:
+            logger.warning(f"Could not detect OpenCode models: {e}")
+        
+        # Fallback to commonly available models
+        return [
+            "github-copilot/claude-3.5-sonnet",
+            "github-copilot/gpt-4o", 
+            "github-copilot/claude-3.7-sonnet",
+            "opencode/grok-code"
+        ]
+    
+    @staticmethod
+    def suggest_models(agent_type: str, user_preference: Optional[str] = None) -> List[str]:
+        """
+        Suggest appropriate models based on agent type and user preference.
+        
+        Args:
+            agent_type: "claude" or "opencode"
+            user_preference: Optional user preference like "fast", "accurate", "cheap"
+            
+        Returns:
+            Ordered list of suggested models
+        """
+        if agent_type == "claude":
+            claude_models = ["sonnet", "haiku", "opus"]
+            if user_preference == "fast":
+                return ["haiku", "sonnet", "opus"]
+            elif user_preference == "accurate":
+                return ["opus", "sonnet", "haiku"]
+            elif user_preference == "cheap":
+                return ["haiku", "sonnet", "opus"]
+            else:
+                return claude_models
+                
+        elif agent_type == "opencode":
+            available_models = UnifiedAgent.get_available_opencode_models()
+            
+            # Prioritize based on preference
+            if user_preference == "fast":
+                priority_order = ["gpt-4o", "claude-3.5-sonnet", "gemini", "claude-3.7"]
+            elif user_preference == "accurate":
+                priority_order = ["claude-opus", "gpt-5", "claude-3.7", "claude-3.5-sonnet"]
+            elif user_preference == "cheap":
+                priority_order = ["gemini", "claude-3.5-sonnet", "gpt-4o"]
+            else:
+                priority_order = ["claude-3.5-sonnet", "gpt-4o", "claude-3.7", "gemini"]
+            
+            # Sort available models by priority
+            suggested = []
+            for priority in priority_order:
+                for model in available_models:
+                    if priority in model and model not in suggested:
+                        suggested.append(model)
+            
+            # Add remaining models
+            for model in available_models:
+                if model not in suggested:
+                    suggested.append(model)
+                    
+            return suggested[:5]  # Return top 5 suggestions
+            
+        return []
+    
     # Dynamic agent configurations
     AGENT_CONFIGS = {
         "claude": AgentCapabilities(
@@ -141,7 +235,7 @@ class UnifiedAgent:
                 "{home}/.local/share/opencode/storage",
                 "{home}/.local/share/opencode/project/global/storage/session"
             ],
-            supported_models=["github-copilot/claude-3.5-sonnet", "mistral:latest"],
+            supported_models=[],  # Will be populated dynamically
             default_model="github-copilot/claude-3.5-sonnet",
             response_patterns=[r'session=([a-zA-Z0-9_-]+)', r'session ([a-zA-Z0-9_-]+)', r'ses_[a-zA-Z0-9_-]+'],
             tool_patterns=["text", "tool", "step-start", "step-finish"],
@@ -167,7 +261,44 @@ class UnifiedAgent:
             
         self.agent_type = agent_type
         self.capabilities = self.AGENT_CONFIGS[agent_type]
+        
+        # Dynamically populate OpenCode models if not already set
+        if agent_type == "opencode" and not self.capabilities.supported_models:
+            self.capabilities.supported_models = self.get_available_opencode_models()
+            logger.info(f"Detected {len(self.capabilities.supported_models)} OpenCode models")
+        
         self.model = model or getattr(self.capabilities, 'default_model', None)
+        
+        # Validate model is supported
+        if self.model and self.capabilities.supported_models and self.model not in self.capabilities.supported_models:
+            suggestions = self.suggest_models(agent_type)
+            logger.warning(f"Model '{self.model}' not in supported models. Available: {self.capabilities.supported_models[:5]}")
+            logger.info(f"Suggested models for {agent_type}: {suggestions}")
+    
+    def get_supported_models(self) -> List[str]:
+        """
+        Get list of supported models for this agent.
+        
+        Returns:
+            List of supported model names
+        """
+        if self.agent_type == "opencode" and not self.capabilities.supported_models:
+            self.capabilities.supported_models = self.get_available_opencode_models()
+        
+        return self.capabilities.supported_models
+    
+    def validate_model(self, model: str) -> bool:
+        """
+        Validate if a model is supported by this agent.
+        
+        Args:
+            model: Model name to validate
+            
+        Returns:
+            True if model is supported, False otherwise
+        """
+        supported = self.get_supported_models()
+        return model in supported if supported else True  # Allow any model if detection failed
         
     def execute(self, prompt: str, config: Optional[AgentConfig] = None) -> AgentResponse:
         """
@@ -197,6 +328,17 @@ class UnifiedAgent:
     def _execute_dynamic(self, prompt: str, config: AgentConfig) -> AgentResponse:
         """Execute prompt using dynamic configuration."""
         capabilities = self.capabilities
+        
+        # Validate model before execution
+        if config.model and not self.validate_model(config.model):
+            logger.error(f"Invalid model '{config.model}' for {self.agent_type}")
+            return AgentResponse(
+                response="",
+                agent=self.agent_type,
+                model=config.model or "unknown",
+                success=False,
+                error_message=f"Model '{config.model}' is not supported for {self.agent_type}"
+            )
         
         # Build command dynamically
         cmd = capabilities.command_template.copy()
@@ -245,8 +387,33 @@ class UnifiedAgent:
             
         cmd.append(prompt)
         
-        # Execute command
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Execute command with timeout
+        try:
+            logger.info(f"Executing command: {' '.join(cmd[:3])} ... (model: {model})")
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                timeout=120  # 2 minute timeout instead of 5
+            )
+        except subprocess.TimeoutExpired:
+            logger.error(f"Command timed out after 2 minutes: {self.agent_type} with model {model}")
+            return AgentResponse(
+                response="",
+                agent=self.agent_type,
+                model=model or "unknown",
+                success=False,
+                error_message=f"Execution timed out after 2 minutes for {self.agent_type} with model {model}. Try a different model or check your connection."
+            )
+        except Exception as e:
+            logger.error(f"Execution failed: {e}")
+            return AgentResponse(
+                response="",
+                agent=self.agent_type,
+                model=model or "unknown", 
+                success=False,
+                error_message=f"Execution failed: {str(e)}"
+            )
         
         # Parse response dynamically
         return self._parse_response_dynamic(result, config, model)
