@@ -13,12 +13,12 @@ uv sync
 
 ### 2. Setup InfluxDB (default database)
 ```bash
-./setup_influxdb.sh
+./scripts/setup_influxdb.sh
 ```
 
 ### 3. Setup Grafana Dashboard (optional)
 ```bash
-./setup_grafana.sh
+./scripts/setup_grafana.sh
 ```
 
 ### 4. Run Evaluations
@@ -50,9 +50,11 @@ uv run python -m mcp_evaluation stats
 │   ├── session_manager.py       # InfluxDB/SQLite storage
 │   ├── unified_agent.py         # Claude/OpenCode interface
 │   └── prompt_loader.py         # Markdown prompt parser
+├── scripts/                     # Setup scripts (InfluxDB, Grafana)
 ├── prompts/                     # Test prompts (001.md - 005.md, 999.md)
 ├── tests/                       # Unit tests
-└── docs/                        # Documentation
+├── docs/                        # Documentation (including FUNCTIONALITY.md)
+└── grafana-mcp-evaluation-dashboard.json  # Grafana dashboard configuration
 ```
 
 ## 🔧 Commands
@@ -203,8 +205,8 @@ Please discover and use available MCP servers to gather system information.
 
 - **Claude requires `--skip-permissions`** for automated evaluation
 - **OpenCode is free** to use
-- **InfluxDB runs in Docker** (started by setup script)
-- **Grafana dashboard available** at http://localhost:3000 (admin/admin)
+- **InfluxDB runs in Docker** (started by `scripts/setup_influxdb.sh`)
+- **Grafana dashboard available** at http://localhost:3000/d/mcp-evaluation-main/mcp-evaluation-system-dashboard (admin/admin)
 - **Data persists** between runs in time-series format
 - **Session IDs** link comparative evaluations
 

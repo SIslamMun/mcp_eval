@@ -149,7 +149,7 @@ uv run python -m mcp_evaluation export --output evaluation_results --format json
 uv run python -m mcp_evaluation setup
 
 # Setup InfluxDB (Docker)
-./setup_influxdb.sh
+./scripts/setup_influxdb.sh
 
 # Validate setup
 uv run python -m mcp_evaluation setup --config evaluation_config_influxdb.yaml
@@ -312,7 +312,7 @@ docker run -d \
 # Access InfluxDB UI directly in browser
 http://localhost:8086
 
-# Default credentials (from setup_influxdb.sh)
+# Default credentials (from scripts/setup_influxdb.sh)
 Username: admin
 Password: adminpassword
 Organization: mcp-evaluation
@@ -369,6 +369,9 @@ docker run -d \
 http://localhost:3000
 Username: admin
 Password: admin
+
+# Pre-configured MCP Evaluation Dashboard:
+http://localhost:3000/d/mcp-evaluation-main/mcp-evaluation-system-dashboard
 ```
 
 ### 🔗 **InfluxDB Data Source Configuration**

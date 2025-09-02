@@ -24,7 +24,7 @@ max_retries: 3
 session_id_format: "eval_prompt{prompt_id:03d}_{timestamp}"
 
 # InfluxDB configuration
-# To use InfluxDB, first run: ./setup_influxdb.sh
+# To use InfluxDB, first run: ./scripts/setup_influxdb.sh
 influxdb_url: "http://localhost:8086"
 influxdb_token: "mcp-evaluation-token"
 influxdb_org: "mcp-evaluation"

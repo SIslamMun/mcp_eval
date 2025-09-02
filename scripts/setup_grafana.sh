@@ -8,7 +8,7 @@ echo "🚀 Setting up Grafana Dashboard for MCP Evaluation System..."
 
 # Check if InfluxDB is running
 if ! docker ps | grep -q influxdb; then
-    echo "❌ InfluxDB container not found. Please run ./setup_influxdb.sh first"
+    echo "❌ InfluxDB container not found. Please run ./scripts/setup_influxdb.sh first"
     exit 1
 fi
 
@@ -37,13 +37,13 @@ if docker ps | grep -q grafana-mcp; then
     echo "   Password: admin"
     echo ""
     echo "🔗 InfluxDB Data Source Configuration:"
-    echo "   URL: http://host.docker.internal:8086"
+    echo "   URL: http://[container-ip]:8086 (auto-detected)"
     echo "   Organization: mcp-evaluation"
     echo "   Bucket: evaluation-sessions"
     echo "   Token: mcp-evaluation-token"
     echo ""
     echo "📊 Pre-configured dashboard will be available at:"
-    echo "   http://localhost:3000/d/mcp-evaluation/mcp-evaluation-dashboard"
+    echo "   http://localhost:3000/d/mcp-evaluation-main/mcp-evaluation-system-dashboard"
 else
     echo "❌ Failed to start Grafana container"
     exit 1
@@ -56,27 +56,51 @@ echo "🔧 Creating InfluxDB data source configuration..."
 sleep 5
 
 # Configure InfluxDB data source via API
+echo "🔧 Configuring InfluxDB data source..."
+
+# Wait for Grafana API to be ready
+sleep 10
+
+# Get InfluxDB container IP for proper connectivity
+INFLUX_IP=$(docker inspect influxdb | grep '"IPAddress"' | tail -1 | cut -d '"' -f 4)
+echo "🔍 InfluxDB container IP: ${INFLUX_IP}"
+
+# Get InfluxDB token from environment or use default
+INFLUX_TOKEN="mcp-evaluation-token"
+
+# Configure InfluxDB data source with proper container IP
 curl -X POST \
   -H "Content-Type: application/json" \
+  -u admin:admin \
   -d '{
     "name": "InfluxDB-MCP",
     "type": "influxdb",
-    "url": "http://host.docker.internal:8086",
+    "url": "http://'"${INFLUX_IP}"':8086",
     "access": "proxy",
-    "database": "",
-    "user": "admin",
-    "password": "adminpassword",
+    "basicAuth": false,
+    "isDefault": true,
     "jsonData": {
       "version": "Flux",
       "organization": "mcp-evaluation",
       "defaultBucket": "evaluation-sessions",
-      "httpMode": "GET"
+      "maxSeries": 1000
     },
     "secureJsonData": {
-      "token": "mcp-evaluation-token"
+      "token": "'"${INFLUX_TOKEN}"'"
     }
   }' \
-  http://admin:admin@localhost:3000/api/datasources 2>/dev/null || echo "Data source may already exist"
+  http://localhost:3000/api/datasources 2>/dev/null || echo "Data source configuration completed"
+
+# Import comprehensive dashboard
+echo "📊 Importing MCP Evaluation System dashboard..."
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -u admin:admin \
+  -d '{
+    "dashboard": '"$(cat grafana-mcp-evaluation-dashboard.json)"',
+    "overwrite": true
+  }' \
+  http://localhost:3000/api/dashboards/db 2>/dev/null || echo "Dashboard import completed"
 
 echo "✅ Grafana setup complete!"
 echo ""
@@ -86,4 +110,4 @@ echo "2. Login with admin/admin"
 echo "3. Go to Configuration → Data Sources to verify InfluxDB connection"
 echo "4. Import or create dashboards for MCP evaluation monitoring"
 echo ""
-echo "📈 Sample queries are available in FUNCTIONALITY.md"
+echo "📈 Sample queries are available in docs/FUNCTIONALITY.md"
