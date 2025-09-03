@@ -146,6 +146,11 @@ class MetricsExtractor:
     def extract_model_from_config(agent_config: Dict[str, Any], agent_type: str) -> str:
         """Extract model name from agent configuration."""
         if not agent_config:
+            # Use default models based on agent type
+            if agent_type == "claude":
+                return "claude-3-5-sonnet-20241022"
+            elif agent_type == "opencode":
+                return "github-copilot/claude-3.5-sonnet"
             return "unknown"
         
         # Try different configuration patterns
@@ -153,11 +158,17 @@ class MetricsExtractor:
         if model:
             return model
         
+        # Check for nested model configs
+        if "config" in agent_config:
+            nested_model = agent_config["config"].get("model", "")
+            if nested_model:
+                return nested_model
+        
         # Default models based on agent type
         if agent_type == "claude":
-            return "sonnet"  # Default Claude model
+            return "claude-3-5-sonnet-20241022"
         elif agent_type == "opencode":
-            return "github-copilot/claude-3.5-sonnet"  # Default OpenCode model
+            return "github-copilot/claude-3.5-sonnet"
         
         return "unknown"
     

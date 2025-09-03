@@ -397,7 +397,9 @@ class UnifiedAgent:
             
         cmd.append(prompt)
         
-        # Execute command with timeout
+        # Execute command with timeout and measure execution time
+        import time
+        start_time = time.time()
         try:
             logger.info(f"Executing command: {' '.join(cmd[:3])} ... (model: {model})")
             result = subprocess.run(
@@ -406,29 +408,34 @@ class UnifiedAgent:
                 text=True, 
                 timeout=120  # 2 minute timeout instead of 5
             )
+            actual_duration_ms = int((time.time() - start_time) * 1000)
         except subprocess.TimeoutExpired:
+            actual_duration_ms = int((time.time() - start_time) * 1000)
             logger.error(f"Command timed out after 2 minutes: {self.agent_type} with model {model}")
             return AgentResponse(
                 response="",
                 agent=self.agent_type,
                 model=model or "unknown",
                 success=False,
-                error_message=f"Execution timed out after 2 minutes for {self.agent_type} with model {model}. Try a different model or check your connection."
+                error_message=f"Execution timed out after 2 minutes for {self.agent_type} with model {model}. Try a different model or check your connection.",
+                duration_ms=actual_duration_ms
             )
         except Exception as e:
+            actual_duration_ms = int((time.time() - start_time) * 1000)
             logger.error(f"Execution failed: {e}")
             return AgentResponse(
                 response="",
                 agent=self.agent_type,
                 model=model or "unknown", 
                 success=False,
-                error_message=f"Execution failed: {str(e)}"
+                error_message=f"Execution failed: {str(e)}",
+                duration_ms=actual_duration_ms
             )
         
         # Parse response dynamically
-        return self._parse_response_dynamic(result, config, model)
+        return self._parse_response_dynamic(result, config, model, actual_duration_ms)
     
-    def _parse_response_dynamic(self, result, config: AgentConfig, model: Optional[str]) -> AgentResponse:
+    def _parse_response_dynamic(self, result, config: AgentConfig, model: Optional[str], actual_duration_ms: int) -> AgentResponse:
         """Parse response using dynamic configuration."""
         capabilities = self.capabilities
         output_config = capabilities.output_parsing
@@ -465,7 +472,7 @@ class UnifiedAgent:
         # Parse output based on capabilities
         response_text = None
         cost_usd = 0.0
-        duration_ms = 0
+        duration_ms = actual_duration_ms  # Use actual measured duration as default
         tokens = {}
         raw_json_output = None  # Store the full JSON for tool extraction
         
@@ -476,7 +483,9 @@ class UnifiedAgent:
                 response_text = data.get(output_config["result_key"], "")
                 session_id = data.get(output_config["session_key"], session_id)
                 cost_usd = data.get(output_config["cost_key"], 0.0)
-                duration_ms = data.get(output_config["duration_key"], 0)
+                # For Claude, use reported duration if available, otherwise use actual measured time
+                reported_duration = data.get(output_config["duration_key"], 0)
+                duration_ms = reported_duration if reported_duration > 0 else actual_duration_ms
                 tokens = data.get(output_config["tokens_key"], {})
             except json.JSONDecodeError:
                 pass

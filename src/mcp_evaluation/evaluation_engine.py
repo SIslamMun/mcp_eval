@@ -242,7 +242,7 @@ class EvaluationEngine:
             cost_usd=result.cost_usd,
             tokens_used=result.tokens.get("total", 0) if result.tokens else None,
             created_at=datetime.now(timezone.utc).isoformat(),
-            completed_at=datetime.now(timezone.utc).isoformat() if result.success else None,
+            completed_at=datetime.now(timezone.utc).isoformat(),  # Always set completed_at
             timestamp=timestamp,
             total_calls=result.total_calls,
             tool_calls=result.tool_calls,
