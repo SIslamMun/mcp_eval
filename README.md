@@ -216,6 +216,9 @@ uv run python -m mcp_evaluation export [--format <json|csv>] [--output <FILE>]
 
 # View specific results
 uv run python -m mcp_evaluation results <PROMPT_ID> [--backend <influxdb|sqlite>]
+
+# Generate comprehensive reports (NEW!)
+uv run python -m mcp_evaluation post-processing [OPTIONS]
 ```
 
 **Examples:**
@@ -231,6 +234,15 @@ uv run python -m mcp_evaluation export --format json --output results.json
 
 # View results for prompt 1
 uv run python -m mcp_evaluation results 1
+
+# Generate comprehensive CSV report with logs
+uv run python -m mcp_evaluation post-processing
+
+# Generate report for specific agent and prompts
+uv run python -m mcp_evaluation post-processing --filter-agent opencode --filter-prompt 1,999
+
+# Show data summary statistics
+uv run python -m mcp_evaluation post-processing --summary
 ```
 
 ## 🎯 Example Output (Parallel Multi-Model)
@@ -312,7 +324,7 @@ MCP Targets (1):
 
 | Agent | Available Models | Example Usage |
 |-------|------------------|---------------|
-| **Claude** | `sonnet` (default), `haiku`, `opus` | `--claude-model haiku` |
+| **Claude** | `sonnet` (default), `haiku`, `opus` | `--claude-model haiku --skip-permissions` |
 | **OpenCode** | `github-copilot/claude-3.5-sonnet` (default)<br>`github-copilot/gpt-4o`<br>`github-copilot/claude-3.7-sonnet-thought`<br>`github-copilot/o1-mini` | `--opencode-model "github-copilot/gpt-4o"` |
 
 ### Multi-Model Comparison Examples
@@ -348,31 +360,131 @@ uv run python -m mcp_evaluation run 1 --claude-models sonnet,haiku --opencode-mo
 | `results` | View specific results | `results <ID> [--backend <TYPE>]` |
 | `export` | Export evaluation data | `export [--format <TYPE>] [--output <FILE>]` |
 | `setup` | Initialize infrastructure | `setup [--backend <TYPE>]` |
+| `post-processing` | Generate comprehensive reports | `post-processing [OPTIONS]` |
 
 ### Common Arguments
 
 | Argument | Description | Values | Example |
 |----------|-------------|--------|---------|
 | `--agent` | Choose evaluation agent | `claude`, `opencode`, `both` | `--agent both` |
-| `--claude-model` | Single Claude model | `sonnet`, `haiku`, `opus` | `--claude-model haiku` |
+| `--claude-model` | Single Claude model | `sonnet`, `haiku`, `opus` | `--claude-model haiku --skip-permissions` |
 | `--opencode-model` | Single OpenCode model | `github-copilot/MODEL` | `--opencode-model "github-copilot/gpt-4o"` |
-| `--claude-models` | Multiple Claude models | Comma-separated list | `--claude-models sonnet,haiku` |
+| `--claude-models` | Multiple Claude models | Comma-separated list | `--claude-models sonnet,haiku --skip-permissions` |
 | `--opencode-models` | Multiple OpenCode models | Comma-separated list | `--opencode-models github-copilot/claude-3.5-sonnet,github-copilot/gpt-4o` |
 | `--skip-permissions` | Skip Claude permissions | Flag (no value) | `--skip-permissions` |
 | `--backend` | Database backend | `influxdb`, `sqlite` | `--backend sqlite` |
 | `--timeout` | Test timeout in seconds | Integer | `--timeout 60` |
 | `--continue-session` | Continue previous session | Flag (no value) | `--continue-session` |
 
-### Default (InfluxDB)
-No configuration needed! Uses InfluxDB by default.
+## 📊 Post-Processing & Advanced Analytics
 
-### SQLite Alternative
+### 🔄 **Post-Processing Engine (NEW!)**
+
+Generate comprehensive evaluation reports from stored database data with advanced filtering and analysis capabilities.
+
+**Command Template:**
 ```bash
-uv run python -m mcp_evaluation run 1 --backend sqlite --skip-permissions
+uv run python -m mcp_evaluation post-processing [OPTIONS]
 ```
 
-### Custom Config
-Create `evaluation_config_influxdb.yaml` or `evaluation_config_sqlite.yaml` to customize settings.
+**Key Features:**
+- **📊 CSV Report Generation**: Structured data with all evaluation metrics
+- **📝 Communication Logs**: Individual log files for each evaluation session
+- **🔍 Advanced Filtering**: Filter by agent, prompts, date ranges
+- **📈 Summary Statistics**: Quick data overview and distribution analysis
+- **🗂️ Multiple Formats**: CSV output with JSON metadata
+
+**Options:**
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--output`, `-o` | Output directory | `--output reports/` |
+| `--format`, `-f` | Report format (csv, json) | `--format csv` |
+| `--backend`, `-b` | Database backend | `--backend influxdb` |
+| `--filter-agent` | Filter by agent type | `--filter-agent claude` |
+| `--filter-prompt` | Filter by prompt IDs | `--filter-prompt 1,2,999` |
+| `--date-from` | Filter from date | `--date-from 2025-09-01` |
+| `--date-to` | Filter to date | `--date-to 2025-09-03` |
+| `--no-logs` | Skip generating log files (logs included by default) | `--no-logs` |
+| `--summary` | Show statistics only | `--summary` |
+
+**Example Commands:**
+```bash
+# Generate full comprehensive report
+uv run python -m mcp_evaluation post-processing
+
+# Claude-only analysis for specific prompts
+uv run python -m mcp_evaluation post-processing --filter-agent claude --filter-prompt 1,2,3
+
+# Date-range analysis
+uv run python -m mcp_evaluation post-processing --date-from 2025-09-01 --date-to 2025-09-03
+
+# Quick data summary
+uv run python -m mcp_evaluation post-processing --summary
+
+# Custom output location without logs
+uv run python -m mcp_evaluation post-processing --output /path/to/reports --format csv --no-logs
+```
+
+### 📄 **Report Output Structure**
+
+```
+reports/
+├── evaluation_report_20250903_143022.csv    # Main CSV report
+├── logs/                                    # Communication logs
+│   ├── eval_prompt001_1756832722.log
+│   ├── eval_prompt999_1756919874.log
+│   └── ...
+└── metadata.json                           # Report generation metadata
+```
+
+### 📊 **CSV Report Columns**
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `number` | Sequential record number | `1, 2, 3...` |
+| `prompt` | Prompt ID used | `1, 2, 999` |
+| `session_id` | Unique session identifier | `eval_prompt001_1756832722` |
+| `agent_type` | Agent used (claude/opencode) | `claude`, `opencode` |
+| `model` | Specific model used | `sonnet`, `github-copilot/gpt-4o` |
+| `success` | Evaluation success status | `True`, `False` |
+| `execution_time` | Duration in seconds | `45.2`, `12.8` |
+| `number_of_calls` | Total API/system calls | `5`, `12` |
+| `number_of_tool_calls` | MCP tool invocations | `3`, `7` |
+| `tools_used` | Tools and call counts | `bash:2,read_file:1` |
+| `cost_usd` | Cost in USD (Claude only) | `0.2376`, `0.0000` |
+| `response_length` | Response text length | `1024`, `2048` |
+| `created_at` | Session start timestamp | `2025-09-03T12:26:42Z` |
+| `completed_at` | Session end timestamp | `2025-09-03T12:27:28Z` |
+| `logfile` | Path to communication log | `logs/session_id.log` |
+| `error_message` | Error details if failed | `Timeout occurred` |
+
+### 📈 **Summary Statistics Output**
+
+```bash
+# Example summary output
+📊 Data Summary Statistics:
+       Evaluation Data Summary       
+┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┓
+┃ Metric                 ┃ Value    ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━┩
+│ Total Records          │ 53       │
+│ Successful Records     │ 47       │
+│ Success Rate           │ 88.68%   │
+│ Database Backend       │ influxdb │
+│ Total Cost (USD)       │ $4.25    │
+│ Average Cost (USD)     │ $0.0913  │
+│ Average Execution Time │ 35.2s    │
+└────────────────────────┴──────────┘
+
+Agent Distribution:
+  • claude: 20 sessions
+  • opencode: 33 sessions
+
+Prompt Distribution:
+  • Prompt 1: 28 sessions
+  • Prompt 999: 14 sessions
+  • Prompt 2: 4 sessions
+```
 
 ## 📄 JSONL Prompt System
 
@@ -422,6 +534,8 @@ uv run python -m mcp_evaluation stats
 - **Need faster testing?** Use `--skip-permissions` for Claude
 - **Timeout issues?** Default 2-minute timeout per model with graceful shutdown
 - **JSONL not loading?** Check for `prompts/prompts_dataset.jsonl` file (auto-detected)
+- **Need detailed analysis?** Use `uv run python -m mcp_evaluation post-processing --summary` for data overview
+- **Report generation failed?** Check database connection and try `--backend sqlite` as fallback
 
 ---
 

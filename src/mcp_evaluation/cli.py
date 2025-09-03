@@ -5,6 +5,7 @@ Command-line interface for MCP evaluation infrastructure.
 import json
 import sys
 import signal
+import logging
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -18,9 +19,11 @@ from rich.progress import track
 
 from . import EvaluationEngine, MarkdownPromptLoader, SessionManager
 from .evaluation_engine import EvaluationConfig
+from .post_processing_engine import PostProcessingEngine
 
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -793,6 +796,193 @@ def results(prompt_ids: List[int], config: Optional[str]):
                     
         except Exception as e:
             console.print(f"❌ [red]Error getting results for prompt {prompt_id}: {e}[/red]")
+
+
+@main.command("post-processing")
+@click.option("--output", "-o", default="reports/", help="Output directory (default: reports/)")
+@click.option("--format", "-f", type=click.Choice(["csv", "json"]), default="csv", help="Report format (default: csv)")
+@click.option("--backend", "-b", type=click.Choice(["influxdb", "sqlite"]), default="influxdb", help="Database backend (default: influxdb)")
+@click.option("--filter-agent", type=click.Choice(["claude", "opencode"]), help="Filter by agent type")
+@click.option("--filter-prompt", help="Filter by prompt ID(s) - comma separated (e.g., '1,2,3')")
+@click.option("--date-from", help="Filter from date (YYYY-MM-DD)")
+@click.option("--date-to", help="Filter to date (YYYY-MM-DD)")
+@click.option("--no-logs", is_flag=True, help="Skip generating communication log files (logs are included by default)")
+@click.option("--include-logs", is_flag=True, hidden=True, help="[DEPRECATED] Use default behavior instead")
+@click.option("--config", "-c", help="Configuration file path")
+@click.option("--summary", is_flag=True, help="Show summary statistics only")
+def post_processing(
+    output: str,
+    format: str, 
+    backend: str,
+    filter_agent: Optional[str],
+    filter_prompt: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+    no_logs: bool,
+    include_logs: bool,
+    config: Optional[str],
+    summary: bool
+):
+    """Generate comprehensive evaluation reports from database."""
+    console.print("[bold blue]🔄 MCP Evaluation Post-Processing Engine[/bold blue]\n")
+    
+    # Handle deprecated --include-logs flag
+    if include_logs:
+        console.print("[yellow]⚠️  Warning: --include-logs is deprecated. Logs are now included by default. Use --no-logs to disable.[/yellow]")
+        # Legacy behavior: --include-logs used to disable logs (toggle behavior)
+        no_logs = True
+    
+    try:
+        # Initialize post-processing engine
+        engine = PostProcessingEngine(
+            backend=backend,
+            output_dir=output,
+            config_path=config
+        )
+        
+        # Show summary statistics if requested
+        if summary:
+            console.print("[bold]📊 Data Summary Statistics:[/bold]")
+            stats = engine.get_summary_statistics()
+            
+            if "error" in stats:
+                console.print(f"❌ [red]Error: {stats['error']}[/red]")
+                return
+            
+            # Display statistics table
+            stats_table = Table(title="Evaluation Data Summary")
+            stats_table.add_column("Metric", style="cyan")
+            stats_table.add_column("Value", style="green")
+            
+            stats_table.add_row("Total Records", str(stats['total_records']))
+            stats_table.add_row("Successful Records", str(stats['successful_records']))
+            stats_table.add_row("Success Rate", f"{stats['success_rate']}%")
+            stats_table.add_row("Database Backend", stats['database_backend'])
+            stats_table.add_row("Total Cost (USD)", f"${stats['total_cost']}")
+            stats_table.add_row("Average Cost (USD)", f"${stats['average_cost']}")
+            stats_table.add_row("Average Execution Time", f"{stats['average_execution_time']}s")
+            
+            console.print(stats_table)
+            
+            # Agent distribution
+            if stats['agent_distribution']:
+                console.print("\n[bold]Agent Distribution:[/bold]")
+                for agent, count in stats['agent_distribution'].items():
+                    console.print(f"  • {agent}: {count} sessions")
+            
+            # Prompt distribution
+            if stats['prompt_distribution']:
+                console.print("\n[bold]Prompt Distribution:[/bold]")
+                for prompt_id, count in sorted(stats['prompt_distribution'].items()):
+                    console.print(f"  • Prompt {prompt_id}: {count} sessions")
+            
+            return
+        
+        # Parse filters
+        filter_prompt_list = None
+        if filter_prompt:
+            try:
+                filter_prompt_list = [int(p.strip()) for p in filter_prompt.split(',')]
+            except ValueError:
+                console.print(f"❌ [red]Invalid prompt filter format: {filter_prompt}[/red]")
+                console.print("Use comma-separated integers, e.g., '1,2,3'")
+                return
+        
+        # Parse dates
+        date_from_obj = None
+        date_to_obj = None
+        
+        if date_from:
+            try:
+                date_from_obj = datetime.fromisoformat(date_from + "T00:00:00+00:00")
+            except ValueError:
+                console.print(f"❌ [red]Invalid date format: {date_from}[/red]")
+                console.print("Use YYYY-MM-DD format")
+                return
+        
+        if date_to:
+            try:
+                date_to_obj = datetime.fromisoformat(date_to + "T23:59:59+00:00")
+            except ValueError:
+                console.print(f"❌ [red]Invalid date format: {date_to}[/red]")
+                console.print("Use YYYY-MM-DD format")
+                return
+        
+        # Show applied filters
+        console.print("[bold]🔍 Applied Filters:[/bold]")
+        console.print(f"  • Database Backend: {backend}")
+        console.print(f"  • Output Format: {format}")
+        console.print(f"  • Output Directory: {output}")
+        if filter_agent:
+            console.print(f"  • Agent Filter: {filter_agent}")
+        if filter_prompt_list:
+            console.print(f"  • Prompt Filter: {filter_prompt_list}")
+        if date_from:
+            console.print(f"  • Date From: {date_from}")
+        if date_to:
+            console.print(f"  • Date To: {date_to}")
+        console.print(f"  • Include Logs: {'No' if no_logs else 'Yes'}")
+        console.print()
+        
+        # Generate report
+        console.print("[bold]🚀 Generating Report...[/bold]")
+        
+        generated_files = engine.generate_report(
+            output_format=format,
+            include_logs=not no_logs,
+            filter_agent=filter_agent,
+            filter_prompt=filter_prompt_list,
+            date_from=date_from_obj,
+            date_to=date_to_obj
+        )
+        
+        # Display results
+        console.print("\n[bold green]✅ Report Generation Complete![/bold green]")
+        
+        results_table = Table(title="Generated Files")
+        results_table.add_column("Type", style="cyan")
+        results_table.add_column("Location", style="green")
+        
+        for file_type, path in generated_files.items():
+            results_table.add_row(file_type.upper(), str(path))
+        
+        console.print(results_table)
+        
+        # Show quick preview of CSV if generated
+        if 'csv' in generated_files:
+            console.print(f"\n[bold]📄 Report Preview:[/bold]")
+            
+            # Read first few lines of CSV for preview
+            import csv as csv_module
+            with open(generated_files['csv'], 'r', encoding='utf-8') as f:
+                reader = csv_module.reader(f)
+                headers = next(reader)
+                rows = []
+                for i, row in enumerate(reader):
+                    if i >= 3:  # Show first 3 data rows
+                        break
+                    rows.append(row)
+            
+            preview_table = Table(show_lines=True)
+            for header in headers[:8]:  # Show first 8 columns
+                preview_table.add_column(header, style="dim")
+            
+            for row in rows:
+                preview_table.add_row(*[str(cell)[:20] + "..." if len(str(cell)) > 20 else str(cell) for cell in row[:8]])
+            
+            console.print(preview_table)
+            console.print(f"[dim]... showing first 3 rows and 8 columns[/dim]")
+        
+        # Usage tips
+        console.print(f"\n[bold yellow]💡 Usage Tips:[/bold yellow]")
+        console.print(f"  • Open CSV in Excel/LibreOffice for detailed analysis")
+        console.print(f"  • Check logs/ directory for communication details")
+        console.print(f"  • Use metadata.json for report information")
+        
+    except Exception as e:
+        console.print(f"❌ [red]Post-processing failed: {e}[/red]")
+        logger.exception("Post-processing failed")
+        sys.exit(1)
 
 
 def display_single_result(result, show_session: bool = True):

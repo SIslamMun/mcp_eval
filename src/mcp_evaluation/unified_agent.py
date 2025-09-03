@@ -48,6 +48,11 @@ class AgentResponse(BaseModel):
     stderr: str = ""
     success: bool = True
     error_message: Optional[str] = None
+    
+    # Tool usage metrics
+    total_calls: int = 0
+    tool_calls: int = 0
+    tools_used: Dict[str, int] = {}
 
 
 class AgentConfig(BaseModel):
@@ -380,8 +385,13 @@ class UnifiedAgent:
             cmd.extend([capabilities.command_options["tools_flag"], ",".join(config.allowed_tools)])
         if config.debug_mode and capabilities.command_options.get("debug_flag"):
             cmd.append(capabilities.command_options["debug_flag"])
-        if config.dangerously_skip_permissions and capabilities.command_options.get("skip_permissions_flag"):
+        
+        # For Claude, always skip permissions to enable tool usage
+        if self.agent_type == "claude" and capabilities.command_options.get("skip_permissions_flag"):
             cmd.append(capabilities.command_options["skip_permissions_flag"])
+        elif config.dangerously_skip_permissions and capabilities.command_options.get("skip_permissions_flag"):
+            cmd.append(capabilities.command_options["skip_permissions_flag"])
+            
         if config.enable_logs and capabilities.command_options.get("logs_flag"):
             cmd.append(capabilities.command_options["logs_flag"])
             
@@ -457,10 +467,12 @@ class UnifiedAgent:
         cost_usd = 0.0
         duration_ms = 0
         tokens = {}
+        raw_json_output = None  # Store the full JSON for tool extraction
         
         if output_config.get("json_response") and result.returncode == 0:
             try:
                 data = json.loads(result.stdout)
+                raw_json_output = result.stdout  # Store the full JSON
                 response_text = data.get(output_config["result_key"], "")
                 session_id = data.get(output_config["session_key"], session_id)
                 cost_usd = data.get(output_config["cost_key"], 0.0)
@@ -480,6 +492,10 @@ class UnifiedAgent:
         if not response_text:
             response_text = f"{self.agent_type.title()} execution completed successfully but response content not accessible in current mode."
         
+        # Extract tool usage metrics using raw JSON if available, otherwise use response text
+        tool_input = raw_json_output if raw_json_output else response_text
+        total_calls, tool_calls, tools_used = self._extract_tool_usage(tool_input, result.stdout, result.stderr)
+        
         return AgentResponse(
             response=response_text,
             session_id=session_id,
@@ -492,8 +508,191 @@ class UnifiedAgent:
             raw_output=result.stdout,
             stderr=result.stderr,
             success=result.returncode == 0,
-            error_message=result.stderr if result.returncode != 0 else None
+            error_message=result.stderr if result.returncode != 0 else None,
+            total_calls=total_calls,
+            tool_calls=tool_calls,
+            tools_used=tools_used
         )
+    
+    def _extract_tool_usage(self, response_text: str, stdout: str, stderr: str) -> tuple[int, int, Dict[str, int]]:
+        """
+        Extract tool usage information from agent output.
+        Returns: (total_calls, tool_calls, tools_used_dict)
+        """
+        import re
+        import json
+        
+        tools_used = {}
+        tool_calls = 0
+        total_calls = 0
+        
+        try:
+            # For Claude: Parse JSON response from raw_output
+            if response_text.strip().startswith('{'):
+                data = json.loads(response_text)
+                total_calls = data.get('num_turns', 0)
+                usage = data.get('usage', {})
+                server_tool_use = usage.get('server_tool_use', {})
+                # Add any server tool use (e.g. web_search_requests)
+                for tool_type, count in server_tool_use.items():
+                    if isinstance(count, int) and count > 0:
+                        tools_used[tool_type] = count
+                        tool_calls += count
+                # Estimate tool calls from num_turns
+                if total_calls > 1:
+                    estimated_tool_calls = total_calls - 1
+                    tool_calls = max(tool_calls, estimated_tool_calls)
+                # Analyze result text for specific MCP tool names
+                result_text = data.get('result', '')
+                # Map patterns to all available MCP tool names
+                mcp_tool_patterns = {
+                    # Filesystem tools
+                    'list_dir': r'(?:list|show|display).*(?:files?|direct(?:ories|ory)|folders?|contents?)',
+                    'read_file': r'(?:read|display|get|show|fetch|load).*(?:README|\.md|file|content|data|text)',
+                    'create_file': r'(?:creat|writ|sav|generat).*(?:file|script|document|\.(?:py|txt|md|json))',
+                    'create_directory': r'(?:creat|mak).*(?:directory|folder|dir)',
+                    'replace_string_in_file': r'(?:updat|modif|edit|replac|chang).*(?:file|content|text|code)',
+                    'edit_notebook_file': r'(?:edit|updat|modif).*(?:notebook|ipynb|cell)',
+                    
+                    # Hardware MCP tools
+                    'hardware_get_cpu_info': r'(?:CPU|processor|core|clock|frequency|model)',
+                    'hardware_get_memory_info': r'(?:memory|RAM|GB|usage|available)',
+                    'hardware_get_disk_info': r'(?:disk|storage|space|volume|drive)',
+                    'hardware_get_system_info': r'(?:system.*info|specs?|os|version|platform)',
+                    'hardware_get_network_info': r'(?:network|interface|connection|IP|ethernet)',
+                    'hardware_get_process_info': r'(?:process|task|running|pid)',
+                    
+                    # Search and analysis tools
+                    'grep_search': r'(?:grep|search|find|pattern|text|string)',
+                    'semantic_search': r'(?:semantic|meaning|context|understand|analyze)',
+                    'file_search': r'(?:find.*file|file.*pattern|glob|search.*file)',
+                    'test_search': r'(?:test|unit test|source|related test)',
+                    'list_code_usages': r'(?:usages?|references?|implementations?|calls?)',
+                    
+                    # Terminal and execution tools
+                    'run_in_terminal': r'(?:run|execut|command|terminal|shell|bash)',
+                    'run_notebook_cell': r'(?:run|execut).*(?:cell|notebook|code)',
+                    'get_terminal_output': r'(?:get|check).*(?:output|result|terminal)',
+                    'get_terminal_selection': r'(?:select|highlight).*terminal',
+                    'get_terminal_last_command': r'(?:last|previous).*command',
+                    
+                    # Git and version control
+                    'get_changed_files': r'(?:git|changes?|diff|modified)',
+                    
+                    # Error checking
+                    'get_errors': r'(?:error|lint|problem|issue|warning)',
+                    
+                    # Web and external tools
+                    'open_simple_browser': r'(?:open|preview|view|browse).*(?:web|url|site)',
+                    'fetch_webpage': r'(?:fetch|get|download).*(?:web|page|url|site)',
+                    'github_repo': r'(?:github|repository|repo)',
+                    
+                    # Project and workspace tools
+                    'create_new_workspace': r'(?:create|new|setup|init).*(?:workspace|project)',
+                    'create_new_jupyter_notebook': r'(?:create|new).*(?:jupyter|notebook|ipynb)',
+                    'install_extension': r'(?:install|add).*(?:extension|plugin)',
+                    'run_vscode_command': r'(?:vscode|command|palette)',
+                    'get_vscode_api': r'(?:api|vscode.*api|extension.*api)',
+                    'get_project_setup_info': r'(?:project|setup|config).*(?:info|details)',
+                    
+                    # VS Code tools
+                    'vscode_searchExtensions_internal': r'(?:search|find|browse).*extension',
+                    'get_search_view_results': r'(?:search|view|results)',
+                    
+                    # Notebook tools
+                    'notebook_install_packages': r'(?:install|add).*(?:package|library|module)',
+                    'notebook_list_packages': r'(?:list|show).*(?:package|library|module)',
+                    'configure_notebook': r'(?:config|setup).*notebook',
+                    'copilot_getNotebookSummary': r'(?:get|show).*(?:notebook|summary)',
+                    
+                    # Python environment tools
+                    'configure_python_environment': r'(?:config|setup).*(?:python|env)',
+                    'get_python_environment_details': r'(?:python|env).*(?:details|info)',
+                    'get_python_executable_details': r'(?:python|executable).*(?:details|path)',
+                    'install_python_packages': r'(?:install|pip).*(?:package|module)'
+                }
+                found_tools = set()
+                for tool_name, pattern in mcp_tool_patterns.items():
+                    if re.search(pattern, result_text, re.IGNORECASE):
+                        found_tools.add(tool_name)
+                # Add found tools to tools_used
+                for tool_name in found_tools:
+                    if tool_name in tools_used:
+                        tools_used[tool_name] += 1
+                    else:
+                        tools_used[tool_name] = 1
+                # If we found specific tools but no explicit tool calls, estimate based on detected tools
+                if found_tools and tool_calls == 0:
+                    tool_calls = len(found_tools)
+                elif found_tools:
+                    tool_calls = max(tool_calls, len(found_tools))
+            else:
+                # For OpenCode: Parse stderr for tool usage
+                if stderr:
+                    # Remove ANSI color codes
+                    clean_stderr = re.sub(r'\x1b\[[0-9;]*m', '', stderr)
+                    
+                    # Look for tool call patterns: | tool_name
+                    tool_pattern = r'\|\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+'
+                    tools_found = re.findall(tool_pattern, clean_stderr)
+                    
+                    # Count each tool usage
+                    for tool in tools_found:
+                        if tool in tools_used:
+                            tools_used[tool] += 1
+                        else:
+                            tools_used[tool] = 1
+                        tool_calls += 1
+                    
+                    total_calls = tool_calls
+                
+                # Fallback: analyze all text for general patterns
+                if tool_calls == 0:
+                    all_text = f"{response_text} {stdout} {stderr}"
+                    
+                    # Enhanced tool patterns based on agent type
+                    if self.agent_type == "claude":
+                        tool_patterns = {
+                            "bash": r"Tool bash\s*:|`bash\s|```bash",
+                            "read_file": r"Tool read_file\s*:|reading.*file",
+                            "write_file": r"Tool write_file\s*:|writing.*file|create.*file",
+                            "list_dir": r"Tool list_dir\s*:|listing.*directory|ls\s|dir\s",
+                            "grep_search": r"Tool grep_search\s*:|grep\s|searching",
+                            "replace_string_in_file": r"Tool replace_string_in_file\s*:|replacing.*text",
+                            "create_file": r"Tool create_file\s*:|creating.*file",
+                            "run_in_terminal": r"Tool run_in_terminal\s*:|terminal.*command",
+                            "mcp": r"Tool.*mcp|MCP\s|mcp.*server",
+                            "api_call": r"API.*call|request.*sent|HTTP.*request"
+                        }
+                    else:  # opencode and others
+                        tool_patterns = {
+                            "bash": r"bash\s*:|`bash\s|```bash",
+                            "file_operations": r"file.*created|file.*written|file.*read",
+                            "terminal": r"terminal\s|command\s|execute\s",
+                            "github_copilot": r"github.*copilot|copilot",
+                            "opencode": r"opencode\s|step.*start|step.*finish",
+                            "text_processing": r"text.*processing|content.*analysis",
+                            "api_call": r"request\s|call\s|invoke"
+                        }
+                    
+                    # Count tool usage patterns
+                    for tool_name, pattern in tool_patterns.items():
+                        matches = len(re.findall(pattern, all_text, re.IGNORECASE))
+                        if matches > 0:
+                            tools_used[tool_name] = matches
+                            tool_calls += matches
+                    
+                    # Estimate total API calls (tool calls + at least 1 main API call)
+                    total_calls = max(tool_calls + 1, 1)  # At least one call for the main response
+                
+        except Exception as e:
+            print(f"Error extracting tool usage: {e}")
+            # Fallback to basic counting
+            total_calls = 1
+            tool_calls = 0
+            tools_used = {}
+        
+        return total_calls, tool_calls, tools_used
     
     def _filter_stdout_dynamic(self, stdout: str, config: AgentConfig) -> Optional[str]:
         """Filter stdout content dynamically based on configuration."""

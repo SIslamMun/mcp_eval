@@ -59,6 +59,11 @@ class SessionData(BaseModel):
     created_at: Optional[str] = None
     completed_at: Optional[str] = None
     timestamp: Optional[int] = None
+    
+    # Tool usage metrics
+    total_calls: Optional[int] = None
+    tool_calls: Optional[int] = None
+    tools_used: Optional[Dict[str, int]] = None
 
 
 class ComparativeSessionData(BaseModel):
@@ -100,9 +105,26 @@ class SQLiteSessionManager:
                     completed_at TIMESTAMP,
                     error_message TEXT,
                     response_data TEXT,
-                    metadata TEXT
+                    metadata TEXT,
+                    total_calls INTEGER DEFAULT 0,
+                    tool_calls INTEGER DEFAULT 0,
+                    tools_used TEXT
                 )
             """)
+            
+            # Add the new columns to existing tables if they don't exist
+            try:
+                conn.execute("ALTER TABLE evaluation_sessions ADD COLUMN total_calls INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute("ALTER TABLE evaluation_sessions ADD COLUMN tool_calls INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute("ALTER TABLE evaluation_sessions ADD COLUMN tools_used TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS comparative_sessions (
@@ -251,17 +273,66 @@ class SQLiteSessionManager:
         return f"eval_prompt{prompt_id:03d}_{timestamp}"
         
     def cleanup_old_sessions(self, days_old: int = 30) -> int:
-        """Cleanup old sessions."""
-        return 0
+        """Clean up sessions older than specified days."""
+        pass
+    
+    def get_all_sessions(self) -> List[Dict[str, Any]]:
+        """Get all sessions from SQLite database."""
+        import sqlite3
+        sessions = []
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT session_id, prompt_id, agent_type, status, created_at, completed_at,
+                           error_message, response_data, metadata, agent_config, total_calls, tool_calls, tools_used
+                    FROM evaluation_sessions
+                    ORDER BY created_at DESC
+                """)
+                
+                for row in cursor.fetchall():
+                    # Parse tools_used JSON if present
+                    tools_used = {}
+                    if row[12]:  # tools_used column
+                        try:
+                            tools_used = json.loads(row[12])
+                        except:
+                            tools_used = {}
+                    
+                    session_data = {
+                        'session_id': row[0],
+                        'prompt_id': row[1],
+                        'agent_type': row[2],
+                        'status': row[3],
+                        'created_at': row[4],
+                        'completed_at': row[5],
+                        'error_message': row[6],
+                        'response_data': row[7],
+                        'metadata': row[8],
+                        'agent_config': row[9],
+                        'total_calls': row[10] or 0,
+                        'tool_calls': row[11] or 0,
+                        'tools_used': tools_used,
+                        'success': row[3] == 'completed'
+                    }
+                    sessions.append(session_data)
+                    
+        except Exception as e:
+            logger.error(f"Failed to get all sessions: {e}")
+        
+        return sessions
         
     def store_session(self, session_data: SessionData) -> None:
         """Store session data."""
         import sqlite3
         with sqlite3.connect(self.db_path) as conn:
+            # Serialize tools_used dict as JSON
+            tools_used_json = json.dumps(session_data.tools_used) if session_data.tools_used else None
+            
             conn.execute("""
                 INSERT OR REPLACE INTO evaluation_sessions 
-                (session_id, prompt_id, agent_type, agent_config, status, error_message, response_data, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (session_id, prompt_id, agent_type, agent_config, status, error_message, response_data, metadata, total_calls, tool_calls, tools_used)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_data.session_id,
                 session_data.prompt_id,
@@ -270,7 +341,10 @@ class SQLiteSessionManager:
                 "completed" if session_data.success else "failed",
                 session_data.error_message,
                 json.dumps(session_data.response_data) if session_data.response_data else None,
-                json.dumps({"execution_time": session_data.execution_time, "cost_usd": session_data.cost_usd})
+                json.dumps({"execution_time": session_data.execution_time, "cost_usd": session_data.cost_usd}),
+                session_data.total_calls or 0,
+                session_data.tool_calls or 0,
+                tools_used_json
             ))
         logger.info(f"Stored session {session_data.session_id}")
         
@@ -438,36 +512,94 @@ class InfluxDBSessionManager:
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session details by ID."""
         try:
+            # Query for ALL fields for this session to reconstruct complete data
             query = f'''
                 from(bucket: "{self.influxdb_bucket}")
                 |> range(start: -30d)
                 |> filter(fn: (r) => r._measurement == "evaluation_session")
                 |> filter(fn: (r) => r.session_id == "{session_id}")
                 |> sort(columns: ["_time"], desc: true)
-                |> limit(n: 1)
             '''
             
             result = self.query_api.query(org=self.influxdb_org, query=query)
             
-            if not result or not result[0].records:
+            if not result:
                 return None
-                
-            record = result[0].records[0]
+            
+            # Collect all field values for this session
+            session_fields = {}
+            session_metadata = {}
+            
+            for table in result:
+                for record in table.records:
+                    field_name = record.get_field()
+                    field_value = record.get_value()
+                    
+                    # Store the most recent value for each field
+                    if field_name not in session_fields:
+                        session_fields[field_name] = field_value
+                        
+                        # Capture common metadata from any record
+                        if not session_metadata:
+                            session_metadata = {
+                                "session_id": session_id,
+                                "prompt_id": record.values.get("prompt_id", "0"),
+                                "agent_type": record.values.get("agent_type", "unknown"),
+                                "status": record.values.get("status", "unknown"),
+                                "created_at": record.get_time().isoformat()
+                            }
+            
+            if not session_fields:
+                return None
+            
+            # Parse complex fields
+            tools_used = {}
+            if "tools_used" in session_fields:
+                try:
+                    tools_used = json.loads(session_fields["tools_used"]) if session_fields["tools_used"] else {}
+                except (json.JSONDecodeError, TypeError):
+                    tools_used = {}
+            
+            response_data = None
+            if "response_data" in session_fields:
+                try:
+                    response_data = json.loads(session_fields["response_data"]) if session_fields["response_data"] else None
+                except (json.JSONDecodeError, TypeError):
+                    response_data = session_fields["response_data"]
+            
+            agent_config = {}
+            if "agent_config" in session_fields:
+                try:
+                    agent_config = json.loads(session_fields["agent_config"]) if session_fields["agent_config"] else {}
+                except (json.JSONDecodeError, TypeError):
+                    agent_config = {}
+            
+            metadata = {}
+            if "metadata" in session_fields:
+                try:
+                    metadata = json.loads(session_fields["metadata"]) if session_fields["metadata"] else {}
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+            
+            # Reconstruct complete session data
             session = {
                 "session_id": session_id,
-                "prompt_id": record.values.get("prompt_id"),
-                "agent_type": record.values.get("agent_type"),
-                "status": record.values.get("status"),
-                "created_at": record.get_time().isoformat(),
-                "agent_config": json.loads(record.values.get("agent_config", "{}")),
-                "metadata": json.loads(record.values.get("metadata", "{}")),
-                "response_data": None,
-                "error_message": record.values.get("error_message")
+                "prompt_id": int(session_metadata.get("prompt_id", 0)),
+                "agent_type": session_metadata.get("agent_type", "unknown"),
+                "status": session_metadata.get("status", "unknown"),
+                "created_at": session_metadata.get("created_at"),
+                "agent_config": agent_config,
+                "metadata": metadata,
+                "response_data": response_data,
+                "error_message": session_fields.get("error_message", ""),
+                "success": session_fields.get("success", False),
+                "execution_time": float(session_fields.get("execution_time", 0.0)),
+                "cost_usd": float(session_fields.get("cost_usd", 0.0)),
+                "tokens_used": int(session_fields.get("tokens_used", 0)),
+                "total_calls": int(session_fields.get("total_calls", 0)),
+                "tool_calls": int(session_fields.get("tool_calls", 0)),
+                "tools_used": tools_used
             }
-            
-            # Try to get response data if completed
-            if record.values.get("response_data"):
-                session["response_data"] = json.loads(record.values.get("response_data"))
                 
             return session
             
@@ -621,6 +753,9 @@ class InfluxDBSessionManager:
                 .field("execution_time", session_data.execution_time or 0.0) \
                 .field("cost_usd", session_data.cost_usd or 0.0) \
                 .field("tokens_used", session_data.tokens_used or 0) \
+                .field("total_calls", session_data.total_calls or 0) \
+                .field("tool_calls", session_data.tool_calls or 0) \
+                .field("tools_used", json.dumps(session_data.tools_used) if session_data.tools_used else "{}") \
                 .field("stored", True) \
                 .time(datetime.now(timezone.utc), WritePrecision.NS)
                 
@@ -826,6 +961,37 @@ class InfluxDBSessionManager:
         if hasattr(self, 'client'):
             self.client.close()
             logger.info("Closed InfluxDB connection")
+    
+    def get_all_sessions(self) -> List[Dict[str, Any]]:
+        """Get all sessions from InfluxDB."""
+        sessions = []
+        
+        try:
+            # Query to get all unique sessions
+            query = f'''
+                from(bucket: "{self.influxdb_bucket}")
+                |> range(start: -365d)
+                |> filter(fn: (r) => r._measurement == "evaluation_session")
+                |> filter(fn: (r) => r._field == "stored")
+                |> group(columns: ["session_id"])
+                |> last()
+            '''
+            
+            result = self.query_api.query(org=self.influxdb_org, query=query)
+            
+            for table in result:
+                for record in table.records:
+                    session_id = record.values.get("session_id")
+                    if session_id:
+                        # Get full session details
+                        session_data = self.get_session(session_id)
+                        if session_data:
+                            sessions.append(session_data)
+                            
+        except Exception as e:
+            logger.error(f"Failed to get all sessions from InfluxDB: {e}")
+        
+        return sessions
 
 
 # Compatibility alias - use the factory function by default

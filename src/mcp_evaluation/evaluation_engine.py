@@ -243,7 +243,10 @@ class EvaluationEngine:
             tokens_used=result.tokens.get("total", 0) if result.tokens else None,
             created_at=datetime.now(timezone.utc).isoformat(),
             completed_at=datetime.now(timezone.utc).isoformat() if result.success else None,
-            timestamp=timestamp
+            timestamp=timestamp,
+            total_calls=result.total_calls,
+            tool_calls=result.tool_calls,
+            tools_used=result.tools_used
         )
         
         self.session_manager.store_session(session_data)
