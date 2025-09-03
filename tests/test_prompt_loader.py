@@ -47,12 +47,11 @@ class TestPromptMetadata:
             complexity="medium",
             target_mcp=["mcp-server"],
             description="Test prompt",
-            timeout=120,
             expected_tools=["Bash", "Edit"],
             tags=["test", "sample"]
         )
         
-        assert metadata.timeout == 120
+        assert metadata.timeout is None  # timeout is optional now
         assert metadata.expected_tools == ["Bash", "Edit"]
         assert metadata.tags == ["test", "sample"]
 
@@ -331,7 +330,6 @@ id: 1
 complexity: "low"
 target_mcp: ["test-mcp"]
 description: "Sample test prompt"
-timeout: 60
 expected_tools: ["Bash", "Read"]
 tags: ["test", "sample"]
 ---
@@ -374,7 +372,7 @@ class TestIntegration:
         assert prompt.metadata.complexity == "low"
         assert prompt.metadata.target_mcp == ["test-mcp"]
         assert prompt.metadata.description == "Sample test prompt"
-        assert prompt.metadata.timeout == 60
+        assert prompt.metadata.timeout is None  # timeout is optional now
         assert prompt.metadata.expected_tools == ["Bash", "Read"]
         assert prompt.metadata.tags == ["test", "sample"]
         

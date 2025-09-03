@@ -38,7 +38,6 @@ class MarkdownPromptLoader:
     complexity: "low"
     target_mcp: ["mcp-name"]
     description: "Brief description"
-    timeout: 60
     expected_tools: ["Bash", "Edit"]
     tags: ["basic", "testing"]
     ---
@@ -237,7 +236,6 @@ id: {prompt_id}
 complexity: "low"
 target_mcp: ["example-mcp"]
 description: "Sample prompt for testing MCP functionality"
-timeout: 60
 expected_tools: ["Bash", "Read"]
 tags: ["sample", "testing"]
 ---

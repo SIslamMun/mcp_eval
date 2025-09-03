@@ -76,8 +76,6 @@ class AgentConfig(BaseModel):
     content_keywords: List[str] = []
     tool_names: List[str] = []
     response_filters: List[str] = []
-    max_response_length: int = 1000
-    max_results_to_try: int = 5
 
 
 class UnifiedAgent:
@@ -98,8 +96,7 @@ class UnifiedAgent:
             result = subprocess.run(
                 ["opencode", "models"], 
                 capture_output=True, 
-                text=True, 
-                timeout=10
+                text=True
             )
             
             if result.returncode == 0:
@@ -114,7 +111,7 @@ class UnifiedAgent:
                 if models:
                     return models
                     
-        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError) as e:
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
             logger.warning(f"Could not detect OpenCode models: {e}")
         
         # Fallback to commonly available models
@@ -244,11 +241,7 @@ class UnifiedAgent:
             default_model="github-copilot/claude-3.5-sonnet",
             response_patterns=[r'session=([a-zA-Z0-9_-]+)', r'session ([a-zA-Z0-9_-]+)', r'ses_[a-zA-Z0-9_-]+'],
             tool_patterns=["text", "tool", "step-start", "step-finish"],
-            content_extraction={
-                "max_truncate": 200,
-                "max_lines": 15,
-                "max_parts": 5
-            }
+            content_extraction={}
         )
     }
     
@@ -405,21 +398,9 @@ class UnifiedAgent:
             result = subprocess.run(
                 cmd, 
                 capture_output=True, 
-                text=True, 
-                timeout=120  # 2 minute timeout instead of 5
+                text=True
             )
             actual_duration_ms = int((time.time() - start_time) * 1000)
-        except subprocess.TimeoutExpired:
-            actual_duration_ms = int((time.time() - start_time) * 1000)
-            logger.error(f"Command timed out after 2 minutes: {self.agent_type} with model {model}")
-            return AgentResponse(
-                response="",
-                agent=self.agent_type,
-                model=model or "unknown",
-                success=False,
-                error_message=f"Execution timed out after 2 minutes for {self.agent_type} with model {model}. Try a different model or check your connection.",
-                duration_ms=actual_duration_ms
-            )
         except Exception as e:
             actual_duration_ms = int((time.time() - start_time) * 1000)
             logger.error(f"Execution failed: {e}")
@@ -720,7 +701,7 @@ class UnifiedAgent:
             
             if content_lines:
                 filtered_response = '\n'.join(content_lines).strip()
-                if len(filtered_response) > 20:  # Configurable minimum length
+                if filtered_response:  # Any non-empty content
                     return filtered_response
         
         return None
@@ -760,9 +741,8 @@ class UnifiedAgent:
             
             recent_messages.sort(key=lambda x: x[0], reverse=True)
             
-            # Try recent messages
-            max_to_try = config.max_results_to_try
-            for mtime, msg_file, msg_data in recent_messages[:max_to_try]:
+            # Try ALL recent messages - no limits
+            for mtime, msg_file, msg_data in recent_messages:
                 msg_id = msg_data.get('id')
                 if not msg_id:
                     continue
@@ -789,7 +769,6 @@ class UnifiedAgent:
             
             content_keywords = config.content_keywords or extraction_config.get("keywords", [])
             content_indicators = config.content_keywords or extraction_config.get("content_indicators", [])  # Use same as keywords if not specified
-            max_truncate = extraction_config.get("max_truncate", config.max_response_length)
             
             text_content = []
             tool_results = []
@@ -807,7 +786,7 @@ class UnifiedAgent:
                     
                     # Extract tool results dynamically
                     elif part_type in tool_patterns:
-                        tool_result = self._extract_tool_content_dynamic(part_data, content_keywords, content_indicators, max_truncate)
+                        tool_result = self._extract_tool_content_dynamic(part_data, content_keywords, content_indicators)
                         if tool_result:
                             tool_results.append(tool_result)
                             
@@ -828,7 +807,7 @@ class UnifiedAgent:
         except Exception as e:
             return None
     
-    def _extract_tool_content_dynamic(self, part_data: dict, keywords: List[str], indicators: List[str], max_length: int) -> Optional[str]:
+    def _extract_tool_content_dynamic(self, part_data: dict, keywords: List[str], indicators: List[str]) -> Optional[str]:
         """Extract tool content dynamically based on keywords and indicators."""
         try:
             tool_name = part_data.get('tool', '')
@@ -841,11 +820,11 @@ class UnifiedAgent:
                 if keywords or indicators:
                     if isinstance(output, str):
                         if any(indicator in output for indicator in indicators) or any(keyword in output.lower() for keyword in keywords):
-                            return f"Tool {tool_name}: {output[:max_length]}{'...' if len(output) > max_length else ''}"
+                            return f"Tool {tool_name}: {output}"
                 else:
                     # No filtering - extract any meaningful content
                     if isinstance(output, str) and output.strip():
-                        return f"Tool {tool_name}: {output[:max_length]}{'...' if len(output) > max_length else ''}"
+                        return f"Tool {tool_name}: {output}"
                 
                 # Try JSON parsing for structured data
                 try:
@@ -901,7 +880,7 @@ class UnifiedAgent:
                     result_parts.append(f"{key}: {value}")
             
             if result_parts:
-                return ', '.join(result_parts[:10])  # Limit to prevent overwhelming output
+                return ', '.join(result_parts)  # No limit - return complete output
                 
             return None
             
