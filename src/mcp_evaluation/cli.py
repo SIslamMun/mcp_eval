@@ -684,6 +684,101 @@ def stats(config: Optional[str]):
         claude_count = len(claude_sessions)
         opencode_count = len(opencode_sessions)
         
+        # Get detailed session metrics for success rate calculation
+        from pathlib import Path
+        import json
+        reports_dir = Path("reports")
+        
+        # Calculate success rates by reading existing evaluation_metrics.json files
+        claude_success_count = 0
+        opencode_success_count = 0
+        claude_session_details = []
+        opencode_session_details = []
+        
+        # Scan Claude reports
+        claude_reports_dir = reports_dir / "claude"
+        if claude_reports_dir.exists():
+            for session_dir in claude_reports_dir.iterdir():
+                if session_dir.is_dir():
+                    metrics_file = session_dir / "evaluation_metrics.json"
+                    if metrics_file.exists():
+                        try:
+                            with open(metrics_file, 'r') as f:
+                                metrics_data = json.load(f)
+                                session_metrics = metrics_data.get('session_metrics', {})
+                                
+                                session_details = {
+                                    'session_id': session_metrics.get('session_id', session_dir.name),
+                                    'success': session_metrics.get('success', False),
+                                    'created_at': session_metrics.get('created_at', 'Unknown'),
+                                    'completed_at': session_metrics.get('completed_at', 'Unknown'),
+                                    'execution_time': session_metrics.get('execution_time', 0),
+                                    'prompt': session_metrics.get('prompt', 'Unknown'),
+                                    'model': session_metrics.get('model', 'Unknown')
+                                }
+                                claude_session_details.append(session_details)
+                                
+                                if session_metrics.get('success', False):
+                                    claude_success_count += 1
+                        except Exception as e:
+                            console.print(f"[yellow]Warning: Could not read {metrics_file}: {e}[/yellow]")
+        
+        # Scan OpenCode reports
+        opencode_reports_dir = reports_dir / "opencode"
+        if opencode_reports_dir.exists():
+            for session_dir in opencode_reports_dir.iterdir():
+                if session_dir.is_dir():
+                    metrics_file = session_dir / "evaluation_metrics.json"
+                    if metrics_file.exists():
+                        try:
+                            with open(metrics_file, 'r') as f:
+                                metrics_data = json.load(f)
+                                session_metrics = metrics_data.get('session_metrics', {})
+                                
+                                session_details = {
+                                    'session_id': session_metrics.get('session_id', session_dir.name),
+                                    'success': session_metrics.get('success', False),
+                                    'created_at': session_metrics.get('created_at', 'Unknown'),
+                                    'completed_at': session_metrics.get('completed_at', 'Unknown'),
+                                    'execution_time': session_metrics.get('execution_time', 0),
+                                    'prompt': session_metrics.get('prompt', 'Unknown'),
+                                    'model': session_metrics.get('model', 'Unknown')
+                                }
+                                opencode_session_details.append(session_details)
+                                
+                                if session_metrics.get('success', False):
+                                    opencode_success_count += 1
+                        except Exception as e:
+                            console.print(f"[yellow]Warning: Could not read {metrics_file}: {e}[/yellow]")
+        
+        # Calculate session percentages (distribution between agents)
+        total_evaluated_sessions = len(claude_session_details) + len(opencode_session_details)
+        claude_session_percentage = (len(claude_session_details) / total_evaluated_sessions * 100) if total_evaluated_sessions > 0 else 0
+        opencode_session_percentage = (len(opencode_session_details) / total_evaluated_sessions * 100) if total_evaluated_sessions > 0 else 0
+        
+        # Calculate success rates for reference
+        claude_success_rate = (claude_success_count / len(claude_session_details) * 100) if claude_session_details else 0
+        opencode_success_rate = (opencode_success_count / len(opencode_session_details) * 100) if opencode_session_details else 0
+        overall_success_rate = ((claude_success_count + opencode_success_count) / total_evaluated_sessions * 100) if total_evaluated_sessions > 0 else 0
+        
+        # Calculate prompt distribution across all sessions
+        prompt_distribution = {}
+        all_session_details = claude_session_details + opencode_session_details
+        for session in all_session_details:
+            prompt_id = session['prompt']
+            if prompt_id not in prompt_distribution:
+                prompt_distribution[prompt_id] = {'total': 0, 'claude': 0, 'opencode': 0}
+            prompt_distribution[prompt_id]['total'] += 1
+            
+        # Add agent-specific counts
+        for session in claude_session_details:
+            prompt_id = session['prompt']
+            prompt_distribution[prompt_id]['claude'] += 1
+            
+        for session in opencode_session_details:
+            prompt_id = session['prompt']
+            prompt_distribution[prompt_id]['opencode'] += 1
+        
         # Recent sessions (last 24 hours)
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
@@ -704,6 +799,10 @@ def stats(config: Optional[str]):
         table.add_row("OpenCode Sessions", str(opencode_count))
         table.add_row("Total Prompts", str(len(prompt_data)))
         table.add_row("Database Type", "InfluxDB")
+        table.add_row("Claude Session %", f"{claude_session_percentage:.1f}% ({len(claude_session_details)} sessions)")
+        table.add_row("OpenCode Session %", f"{opencode_session_percentage:.1f}% ({len(opencode_session_details)} sessions)")
+        table.add_row("Claude Success Rate", f"{claude_success_rate:.1f}% ({claude_success_count}/{len(claude_session_details)})" if claude_session_details else "0% (0/0)")
+        table.add_row("OpenCode Success Rate", f"{opencode_success_rate:.1f}% ({opencode_success_count}/{len(opencode_session_details)})" if opencode_session_details else "0% (0/0)")
         
         console.print(table)
         
@@ -712,17 +811,162 @@ def stats(config: Optional[str]):
         for agent, count in agent_distribution.items():
             console.print(f"  • {agent}: {count} sessions")
         
-        # Prompt complexity distribution
+        # Session Details by Agent
+        if claude_session_details:
+            console.print("\n[bold]Claude Session Details:[/bold]")
+            claude_table = Table()
+            claude_table.add_column("Session ID", style="cyan", max_width=30)
+            claude_table.add_column("Success", style="green")
+            claude_table.add_column("Prompt", style="yellow")
+            claude_table.add_column("Model", style="blue")
+            claude_table.add_column("Duration", style="magenta")
+            claude_table.add_column("Created At", style="dim")
+            
+            for session in sorted(claude_session_details, key=lambda x: x['created_at'], reverse=True):
+                success_icon = "✅" if session['success'] else "❌"
+                duration_str = f"{session['execution_time']:.1f}s" if session['execution_time'] else "N/A"
+                # Truncate session ID for display
+                session_id_short = session['session_id'][:20] + "..." if len(session['session_id']) > 23 else session['session_id']
+                created_at_short = session['created_at'][:19] if session['created_at'] != 'Unknown' else 'Unknown'
+                
+                claude_table.add_row(
+                    session_id_short,
+                    success_icon,
+                    str(session['prompt']),
+                    session['model'],
+                    duration_str,
+                    created_at_short
+                )
+            console.print(claude_table)
+        
+        if opencode_session_details:
+            console.print("\n[bold]OpenCode Session Details:[/bold]")
+            opencode_table = Table()
+            opencode_table.add_column("Session ID", style="cyan", max_width=30)
+            opencode_table.add_column("Success", style="green")
+            opencode_table.add_column("Prompt", style="yellow")
+            opencode_table.add_column("Model", style="blue")
+            opencode_table.add_column("Duration", style="magenta")
+            opencode_table.add_column("Created At", style="dim")
+            
+            for session in sorted(opencode_session_details, key=lambda x: x['created_at'], reverse=True):
+                success_icon = "✅" if session['success'] else "❌"
+                duration_str = f"{session['execution_time']:.1f}s" if session['execution_time'] else "N/A"
+                # Truncate session ID for display
+                session_id_short = session['session_id'][:20] + "..." if len(session['session_id']) > 23 else session['session_id']
+                created_at_short = session['created_at'][:19] if session['created_at'] != 'Unknown' else 'Unknown'
+                
+                opencode_table.add_row(
+                    session_id_short,
+                    success_icon,
+                    str(session['prompt']),
+                    session['model'],
+                    duration_str,
+                    created_at_short
+                )
+            console.print(opencode_table)
+        
+        # Prompt Distribution
+        if prompt_distribution:
+            console.print("\n[bold]Prompt Distribution Across Sessions:[/bold]")
+            prompt_table = Table()
+            prompt_table.add_column("Prompt ID", style="cyan")
+            prompt_table.add_column("Total Sessions", style="magenta")
+            prompt_table.add_column("Percentage", style="green")
+            prompt_table.add_column("Claude", style="blue")
+            prompt_table.add_column("OpenCode", style="yellow")
+            
+            for prompt_id, counts in sorted(prompt_distribution.items()):
+                percentage = (counts['total'] / total_evaluated_sessions * 100) if total_evaluated_sessions > 0 else 0
+                prompt_table.add_row(
+                    str(prompt_id),
+                    str(counts['total']),
+                    f"{percentage:.1f}%",
+                    str(counts['claude']),
+                    str(counts['opencode'])
+                )
+            console.print(prompt_table)
+        
+        # Prompt Statistics
+        if prompt_data:
+            console.print("\n[bold]Prompt Statistics:[/bold]")
+            
+            # Complexity distribution
+            complexity_stats = {}
+            category_stats = {}
+            timeout_stats = {'total': 0, 'avg': 0, 'min': float('inf'), 'max': 0}
+            tag_stats = {}
+            
+            for prompt in prompt_data:
+                # Access metadata attributes correctly
+                metadata = getattr(prompt, 'metadata', None)
+                if metadata:
+                    # Complexity distribution
+                    complexity = getattr(metadata, 'complexity', 'unknown')
+                    complexity_stats[complexity] = complexity_stats.get(complexity, 0) + 1
+                    
+                    # Category distribution
+                    category = getattr(metadata, 'category', 'unknown')
+                    category_stats[category] = category_stats.get(category, 0) + 1
+                    
+                    # Timeout statistics
+                    timeout = getattr(metadata, 'timeout', 0)
+                    if timeout and timeout > 0:
+                        timeout_stats['total'] += timeout
+                        timeout_stats['min'] = min(timeout_stats['min'], timeout)
+                        timeout_stats['max'] = max(timeout_stats['max'], timeout)
+                    
+                    # Tag statistics
+                    tags = getattr(metadata, 'tags', [])
+                    if tags:
+                        for tag in tags:
+                            tag_stats[tag] = tag_stats.get(tag, 0) + 1
+            
+            # Calculate average timeout
+            if len(prompt_data) > 0:
+                timeout_stats['avg'] = timeout_stats['total'] / len(prompt_data)
+                if timeout_stats['min'] == float('inf'):
+                    timeout_stats['min'] = 0
+            
+            # Display complexity distribution
+            if complexity_stats:
+                console.print(f"\n[bold cyan]Complexity Distribution:[/bold cyan]")
+                for complexity, count in sorted(complexity_stats.items()):
+                    percentage = (count / len(prompt_data) * 100)
+                    console.print(f"  • {complexity}: {count} prompts ({percentage:.1f}%)")
+            
+            # Display category distribution
+            if category_stats:
+                console.print(f"\n[bold cyan]Category Distribution:[/bold cyan]")
+                for category, count in sorted(category_stats.items()):
+                    percentage = (count / len(prompt_data) * 100)
+                    console.print(f"  • {category}: {count} prompts ({percentage:.1f}%)")
+            
+            # Display timeout statistics
+            if timeout_stats['total'] > 0:
+                console.print(f"\n[bold cyan]Timeout Statistics:[/bold cyan]")
+                console.print(f"  • Average: {timeout_stats['avg']:.1f} seconds")
+                console.print(f"  • Range: {timeout_stats['min']}-{timeout_stats['max']} seconds")
+            
+            # Display top tags
+            if tag_stats:
+                console.print(f"\n[bold cyan]Most Common Tags:[/bold cyan]")
+                sorted_tags = sorted(tag_stats.items(), key=lambda x: x[1], reverse=True)
+                for tag, count in sorted_tags[:5]:  # Show top 5 tags
+                    console.print(f"  • {tag}: {count} prompts")
+        
+        # Prompt complexity distribution (old code for backward compatibility)
         complexity_distribution = {}
         for prompt in prompt_data:
             # prompt is a PromptData object, access its attributes directly
-            complexity = getattr(prompt, 'complexity', 'unknown')
-            complexity_distribution[complexity] = complexity_distribution.get(complexity, 0) + 1
+            metadata = getattr(prompt, 'metadata', None)
+            if metadata:
+                complexity = getattr(metadata, 'complexity', 'unknown')
+                complexity_distribution[complexity] = complexity_distribution.get(complexity, 0) + 1
         
         if complexity_distribution:
-            console.print("\n[bold]Prompt Complexity Distribution:[/bold]")
-            for complexity, count in complexity_distribution.items():
-                console.print(f"  • {complexity}: {count} prompts")
+            # This section is now handled by the detailed prompt statistics above
+            pass
         
         # MCP targets
         mcp_targets = set()
