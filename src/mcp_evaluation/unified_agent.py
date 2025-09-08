@@ -506,7 +506,8 @@ class UnifiedAgent:
     
     def _extract_tool_usage(self, response_text: str, stdout: str, stderr: str) -> tuple[int, int, Dict[str, int]]:
         """
-        Extract tool usage information from agent output.
+        Extract tool usage information from agent output dynamically.
+        This method analyzes agent responses to detect MCP tool usage without hardcoded patterns.
         Returns: (total_calls, tool_calls, tools_used_dict)
         """
         import re
@@ -523,106 +524,42 @@ class UnifiedAgent:
                 total_calls = data.get('num_turns', 0)
                 usage = data.get('usage', {})
                 server_tool_use = usage.get('server_tool_use', {})
-                # Add any server tool use (e.g. web_search_requests)
+                
+                # Add any server tool use (generic approach)
                 for tool_type, count in server_tool_use.items():
                     if isinstance(count, int) and count > 0:
                         tools_used[tool_type] = count
                         tool_calls += count
+                
                 # Estimate tool calls from num_turns
                 if total_calls > 1:
                     estimated_tool_calls = total_calls - 1
                     tool_calls = max(tool_calls, estimated_tool_calls)
-                # Analyze result text for specific MCP tool names
+                
+                # Generic pattern-based tool detection from result text
                 result_text = data.get('result', '')
-                # Map patterns to all available MCP tool names
-                mcp_tool_patterns = {
-                    # Filesystem tools
-                    'list_dir': r'(?:list|show|display).*(?:files?|direct(?:ories|ory)|folders?|contents?)',
-                    'read_file': r'(?:read|display|get|show|fetch|load).*(?:README|\.md|file|content|data|text)',
-                    'create_file': r'(?:creat|writ|sav|generat).*(?:file|script|document|\.(?:py|txt|md|json))',
-                    'create_directory': r'(?:creat|mak).*(?:directory|folder|dir)',
-                    'replace_string_in_file': r'(?:updat|modif|edit|replac|chang).*(?:file|content|text|code)',
-                    'edit_notebook_file': r'(?:edit|updat|modif).*(?:notebook|ipynb|cell)',
-                    
-                    # Hardware MCP tools
-                    'hardware_get_cpu_info': r'(?:CPU|processor|core|clock|frequency|model)',
-                    'hardware_get_memory_info': r'(?:memory|RAM|GB|usage|available)',
-                    'hardware_get_disk_info': r'(?:disk|storage|space|volume|drive)',
-                    'hardware_get_system_info': r'(?:system.*info|specs?|os|version|platform)',
-                    'hardware_get_network_info': r'(?:network|interface|connection|IP|ethernet)',
-                    'hardware_get_process_info': r'(?:process|task|running|pid)',
-                    
-                    # Search and analysis tools
-                    'grep_search': r'(?:grep|search|find|pattern|text|string)',
-                    'semantic_search': r'(?:semantic|meaning|context|understand|analyze)',
-                    'file_search': r'(?:find.*file|file.*pattern|glob|search.*file)',
-                    'test_search': r'(?:test|unit test|source|related test)',
-                    'list_code_usages': r'(?:usages?|references?|implementations?|calls?)',
-                    
-                    # Terminal and execution tools
-                    'run_in_terminal': r'(?:run|execut|command|terminal|shell|bash)',
-                    'run_notebook_cell': r'(?:run|execut).*(?:cell|notebook|code)',
-                    'get_terminal_output': r'(?:get|check).*(?:output|result|terminal)',
-                    'get_terminal_selection': r'(?:select|highlight).*terminal',
-                    'get_terminal_last_command': r'(?:last|previous).*command',
-                    
-                    # Git and version control
-                    'get_changed_files': r'(?:git|changes?|diff|modified)',
-                    
-                    # Error checking
-                    'get_errors': r'(?:error|lint|problem|issue|warning)',
-                    
-                    # Web and external tools
-                    'open_simple_browser': r'(?:open|preview|view|browse).*(?:web|url|site)',
-                    'fetch_webpage': r'(?:fetch|get|download).*(?:web|page|url|site)',
-                    'github_repo': r'(?:github|repository|repo)',
-                    
-                    # Project and workspace tools
-                    'create_new_workspace': r'(?:create|new|setup|init).*(?:workspace|project)',
-                    'create_new_jupyter_notebook': r'(?:create|new).*(?:jupyter|notebook|ipynb)',
-                    'install_extension': r'(?:install|add).*(?:extension|plugin)',
-                    'run_vscode_command': r'(?:vscode|command|palette)',
-                    'get_vscode_api': r'(?:api|vscode.*api|extension.*api)',
-                    'get_project_setup_info': r'(?:project|setup|config).*(?:info|details)',
-                    
-                    # VS Code tools
-                    'vscode_searchExtensions_internal': r'(?:search|find|browse).*extension',
-                    'get_search_view_results': r'(?:search|view|results)',
-                    
-                    # Notebook tools
-                    'notebook_install_packages': r'(?:install|add).*(?:package|library|module)',
-                    'notebook_list_packages': r'(?:list|show).*(?:package|library|module)',
-                    'configure_notebook': r'(?:config|setup).*notebook',
-                    'copilot_getNotebookSummary': r'(?:get|show).*(?:notebook|summary)',
-                    
-                    # Python environment tools
-                    'configure_python_environment': r'(?:config|setup).*(?:python|env)',
-                    'get_python_environment_details': r'(?:python|env).*(?:details|info)',
-                    'get_python_executable_details': r'(?:python|executable).*(?:details|path)',
-                    'install_python_packages': r'(?:install|pip).*(?:package|module)'
-                }
-                found_tools = set()
-                for tool_name, pattern in mcp_tool_patterns.items():
-                    if re.search(pattern, result_text, re.IGNORECASE):
-                        found_tools.add(tool_name)
-                # Add found tools to tools_used
-                for tool_name in found_tools:
+                detected_tools = self._detect_tools_dynamically(result_text)
+                
+                # Add detected tools to tools_used
+                for tool_name in detected_tools:
                     if tool_name in tools_used:
                         tools_used[tool_name] += 1
                     else:
                         tools_used[tool_name] = 1
-                # If we found specific tools but no explicit tool calls, estimate based on detected tools
-                if found_tools and tool_calls == 0:
-                    tool_calls = len(found_tools)
-                elif found_tools:
-                    tool_calls = max(tool_calls, len(found_tools))
+                
+                # Update tool call count if we detected specific tools
+                if detected_tools and tool_calls == 0:
+                    tool_calls = len(detected_tools)
+                elif detected_tools:
+                    tool_calls = max(tool_calls, len(detected_tools))
+                    
             else:
-                # For OpenCode: Parse stderr for tool usage
+                # For OpenCode and other agents: Parse stderr for tool usage
                 if stderr:
-                    # Remove ANSI color codes
+                    # Remove ANSI color codes for clean parsing
                     clean_stderr = re.sub(r'\x1b\[[0-9;]*m', '', stderr)
                     
-                    # Look for tool call patterns: | tool_name
+                    # Dynamic tool detection from stderr patterns
                     tool_pattern = r'\|\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+'
                     tools_found = re.findall(tool_pattern, clean_stderr)
                     
@@ -636,53 +573,245 @@ class UnifiedAgent:
                     
                     total_calls = tool_calls
                 
-                # Fallback: analyze all text for general patterns
+                # Fallback: Generic tool detection from all text
                 if tool_calls == 0:
                     all_text = f"{response_text} {stdout} {stderr}"
+                    detected_tools = self._detect_tools_dynamically(all_text)
                     
-                    # Enhanced tool patterns based on agent type
-                    if self.agent_type == "claude":
-                        tool_patterns = {
-                            "bash": r"Tool bash\s*:|`bash\s|```bash",
-                            "read_file": r"Tool read_file\s*:|reading.*file",
-                            "write_file": r"Tool write_file\s*:|writing.*file|create.*file",
-                            "list_dir": r"Tool list_dir\s*:|listing.*directory|ls\s|dir\s",
-                            "grep_search": r"Tool grep_search\s*:|grep\s|searching",
-                            "replace_string_in_file": r"Tool replace_string_in_file\s*:|replacing.*text",
-                            "create_file": r"Tool create_file\s*:|creating.*file",
-                            "run_in_terminal": r"Tool run_in_terminal\s*:|terminal.*command",
-                            "mcp": r"Tool.*mcp|MCP\s|mcp.*server",
-                            "api_call": r"API.*call|request.*sent|HTTP.*request"
-                        }
-                    else:  # opencode and others
-                        tool_patterns = {
-                            "bash": r"bash\s*:|`bash\s|```bash",
-                            "file_operations": r"file.*created|file.*written|file.*read",
-                            "terminal": r"terminal\s|command\s|execute\s",
-                            "github_copilot": r"github.*copilot|copilot",
-                            "opencode": r"opencode\s|step.*start|step.*finish",
-                            "text_processing": r"text.*processing|content.*analysis",
-                            "api_call": r"request\s|call\s|invoke"
-                        }
-                    
-                    # Count tool usage patterns
-                    for tool_name, pattern in tool_patterns.items():
-                        matches = len(re.findall(pattern, all_text, re.IGNORECASE))
-                        if matches > 0:
-                            tools_used[tool_name] = matches
-                            tool_calls += matches
+                    # Count detected tools
+                    for tool_name in detected_tools:
+                        tools_used[tool_name] = tools_used.get(tool_name, 0) + 1
+                        tool_calls += 1
                     
                     # Estimate total API calls (tool calls + at least 1 main API call)
-                    total_calls = max(tool_calls + 1, 1)  # At least one call for the main response
+                    total_calls = max(tool_calls + 1, 1)
                 
         except Exception as e:
-            print(f"Error extracting tool usage: {e}")
+            logger.debug(f"Error extracting tool usage: {e}")
             # Fallback to basic counting
             total_calls = 1
             tool_calls = 0
             tools_used = {}
         
         return total_calls, tool_calls, tools_used
+    
+    def _detect_tools_dynamically(self, text: str) -> set:
+        """
+        Dynamically detect MCP tool usage from text without hardcoded patterns.
+        Uses generic patterns that work across different MCP implementations.
+        
+        Args:
+            text: Text content to analyze
+            
+        Returns:
+            Set of detected tool names
+        """
+        import re
+        
+        detected_tools = set()
+        
+        # Generic patterns for common MCP tool categories
+        generic_patterns = {
+            # Pattern for explicit tool mentions (Tool: name, Tool name:, etc.)
+            'explicit_tool': r'(?:Tool|tool)[\s:]+([a-zA-Z_][a-zA-Z0-9_]*)',
+            
+            # Pattern for function-like calls (function_name(), tool_name())
+            'function_call': r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\)',
+            
+            # Pattern for action verbs indicating tool usage
+            'action_pattern': r'(?:executing|calling|using|invoking|running)\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+            
+            # Pattern for MCP server references
+            'mcp_reference': r'(?:mcp|MCP)[\s-]*([a-zA-Z_][a-zA-Z0-9_]*)',
+            
+            # Pattern for command-like structures
+            'command_pattern': r'`([a-zA-Z_][a-zA-Z0-9_]*)`',
+            
+            # Pattern for step-based execution (common in OpenCode)
+            'step_pattern': r'step[\s-]*([a-zA-Z_][a-zA-Z0-9_]*)',
+        }
+        
+        # Apply generic patterns to detect tools
+        for pattern_name, pattern in generic_patterns.items():
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                # Filter out common non-tool words
+                if self._is_likely_tool_name(match):
+                    detected_tools.add(match.lower())
+        
+        # Additional heuristics for specific agent types
+        if self.agent_type == "claude":
+            # Claude-specific tool detection patterns
+            claude_tools = self._detect_claude_tools(text)
+            detected_tools.update(claude_tools)
+        elif self.agent_type == "opencode":
+            # OpenCode-specific tool detection patterns  
+            opencode_tools = self._detect_opencode_tools(text)
+            detected_tools.update(opencode_tools)
+        
+        return detected_tools
+    
+    def _is_likely_tool_name(self, name: str) -> bool:
+        """
+        Heuristic to determine if a detected name is likely a tool name.
+        
+        Args:
+            name: Potential tool name
+            
+        Returns:
+            True if name appears to be a tool name
+        """
+        # Skip common words that are not tools
+        common_non_tools = {
+            'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+            'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before',
+            'after', 'above', 'below', 'between', 'among', 'upon', 'against',
+            'within', 'without', 'since', 'until', 'while', 'because', 'although',
+            'if', 'when', 'where', 'how', 'why', 'what', 'who', 'which', 'this',
+            'that', 'these', 'those', 'a', 'an', 'some', 'any', 'all', 'each',
+            'every', 'no', 'none', 'one', 'two', 'three', 'first', 'second',
+            'last', 'next', 'previous', 'new', 'old', 'big', 'small', 'good',
+            'bad', 'right', 'wrong', 'true', 'false', 'yes', 'no', 'maybe',
+            'can', 'could', 'will', 'would', 'should', 'must', 'may', 'might',
+            'do', 'does', 'did', 'done', 'have', 'has', 'had', 'be', 'is', 
+            'are', 'was', 'were', 'been', 'being', 'get', 'got', 'go', 'went',
+            'gone', 'come', 'came', 'see', 'saw', 'seen', 'know', 'knew', 'known',
+            'take', 'took', 'taken', 'give', 'gave', 'given', 'make', 'made',
+            'say', 'said', 'tell', 'told', 'think', 'thought', 'find', 'found',
+            'use', 'used', 'work', 'worked', 'call', 'called', 'try', 'tried',
+            'ask', 'asked', 'need', 'needed', 'want', 'wanted', 'look', 'looked',
+            'seem', 'seemed', 'feel', 'felt', 'leave', 'left', 'put', 'keep',
+            'kept', 'let', 'begin', 'began', 'begun', 'help', 'helped', 'show',
+            'showed', 'shown', 'hear', 'heard', 'play', 'played', 'run', 'ran',
+            'move', 'moved', 'live', 'lived', 'believe', 'believed', 'hold',
+            'held', 'bring', 'brought', 'happen', 'happened', 'write', 'wrote',
+            'written', 'provide', 'provided', 'sit', 'sat', 'stand', 'stood',
+            'lose', 'lost', 'pay', 'paid', 'meet', 'met', 'include', 'included',
+            'continue', 'continued', 'set', 'learn', 'learned', 'change', 'changed',
+            'lead', 'led', 'understand', 'understood', 'watch', 'watched',
+            'follow', 'followed', 'stop', 'stopped', 'create', 'created',
+            'speak', 'spoke', 'spoken', 'read', 'open', 'opened', 'close',
+            'closed', 'build', 'built', 'spend', 'spent', 'cut', 'grow', 'grew',
+            'grown', 'fall', 'fell', 'fallen', 'reach', 'reached', 'kill',
+            'killed', 'remain', 'remained', 'suggest', 'suggested', 'raise',
+            'raised', 'pass', 'passed', 'sell', 'sold', 'require', 'required',
+            'report', 'reported', 'decide', 'decided', 'pull', 'pulled'
+        }
+        
+        name_lower = name.lower().strip()
+        
+        # Skip if it's a common non-tool word
+        if name_lower in common_non_tools:
+            return False
+        
+        # Skip if too short (likely not a meaningful tool name)
+        if len(name_lower) < 3:
+            return False
+        
+        # Skip if it's all numbers
+        if name_lower.isdigit():
+            return False
+        
+        # Tool names typically contain underscores, are compound words, or end with common suffixes
+        tool_indicators = [
+            '_',  # Contains underscore (common in function names)
+            'mcp',  # Contains mcp
+            'tool',  # Contains tool
+            'api',  # Contains api
+            'file',  # File operations
+            'dir',  # Directory operations  
+            'search',  # Search operations
+            'get',  # Getter operations
+            'set',  # Setter operations
+            'create',  # Create operations
+            'delete',  # Delete operations
+            'update',  # Update operations
+            'list',  # List operations
+            'run',  # Run operations
+            'execute',  # Execute operations
+            'fetch',  # Fetch operations
+            'load',  # Load operations
+            'save',  # Save operations
+            'read',  # Read operations
+            'write',  # Write operations
+        ]
+        
+        # Check if name contains any tool indicators
+        for indicator in tool_indicators:
+            if indicator in name_lower:
+                return True
+        
+        # If name is CamelCase or contains capital letters (common in API names)
+        if any(c.isupper() for c in name) and len(name) > 3:
+            return True
+        
+        # If name follows common naming patterns
+        if len(name_lower) > 5 and any(pattern in name_lower for pattern in ['handler', 'service', 'client', 'manager', 'processor']):
+            return True
+        
+        return False
+    
+    def _detect_claude_tools(self, text: str) -> set:
+        """
+        Detect Claude-specific tool usage patterns.
+        
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Set of detected Claude tool names
+        """
+        import re
+        
+        detected = set()
+        
+        # Claude-specific patterns
+        claude_patterns = [
+            r'Tool\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:',  # Tool name:
+            r'Using\s+tool\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # Using tool name
+            r'Calling\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+tool',  # Calling name tool
+            r'```(\w+)',  # Code blocks often indicate tool usage
+            r'<tool_use>.*?<tool_name>([^<]+)</tool_name>',  # XML-style tool calls
+        ]
+        
+        for pattern in claude_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
+            for match in matches:
+                if self._is_likely_tool_name(match):
+                    detected.add(match.lower())
+        
+        return detected
+    
+    def _detect_opencode_tools(self, text: str) -> set:
+        """
+        Detect OpenCode-specific tool usage patterns.
+        
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Set of detected OpenCode tool names
+        """
+        import re
+        
+        detected = set()
+        
+        # OpenCode-specific patterns
+        opencode_patterns = [
+            r'\|\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+',  # | tool_name format
+            r'step-start.*?([a-zA-Z_][a-zA-Z0-9_]*)',  # step-start patterns
+            r'step-finish.*?([a-zA-Z_][a-zA-Z0-9_]*)',  # step-finish patterns
+            r'executing\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # executing tool_name
+            r'tool\.([a-zA-Z_][a-zA-Z0-9_]*)',  # tool.name patterns
+        ]
+        
+        for pattern in opencode_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if self._is_likely_tool_name(match):
+                    detected.add(match.lower())
+        
+        return detected
     
     def _filter_stdout_dynamic(self, stdout: str, config: AgentConfig) -> Optional[str]:
         """Filter stdout content dynamically based on configuration."""

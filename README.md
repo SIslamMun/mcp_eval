@@ -25,7 +25,7 @@ uv venv --clear && source .venv/bin/activate && uv sync
 uv run python -m mcp_evaluation run 1 --agent both --skip-permissions
 
 # Generate reports
-uv run python -m mcp_evaluation post-processing --summary
+uv run python -m mcp_evaluation post-processing
 ```
 
 ## 🔧 Command Reference
@@ -36,15 +36,23 @@ uv run python -m mcp_evaluation post-processing --summary
 |---------|---------|-------------|
 | `run <ID>` | Single prompt evaluation | `run 1 --agent both --skip-permissions` |
 | `run-all` | All prompts evaluation | `run-all --agent both --skip-permissions` |
-| `post-processing` | Generate reports | `post-processing --summary` |
+| `post-processing` | Generate reports | `post-processing` |
+| `stats` | View evaluation statistics | `stats` |
 | `models` | List available models | `models --agent both --preference fast` |
 | `test` | Quick functionality test | `test --agent opencode` |
 | `cleanup` | Clean processes | `cleanup` |
 
+### Additional Commands
+
+| Command | Purpose | Basic Usage |
+|---------|---------|-------------|
+| `setup` | Initialize infrastructure | `setup` |
+| `batch <IDs>` | Multiple prompt evaluation | `batch 1 2 3 --agent both` |
+
 ### Agent & Model Options
 
 **Claude Models:** `sonnet` (balanced), `haiku` (fast), `opus` (accurate)
-**OpenCode Models:** `github-copilot/claude-3.5-sonnet`, `github-copilot/gpt-4o`
+**OpenCode Models:** `github-copilot/claude-3.5-sonnet`, `github-copilot/gpt-4o`, `github-copilot/claude-3.7-sonnet`
 
 ### Key Examples
 
@@ -59,40 +67,45 @@ uv run python -m mcp_evaluation run 1 --claude-models sonnet,haiku --skip-permis
 uv run python -m mcp_evaluation run-all --agent both --skip-permissions
 
 # Generate reports
-uv run python -m mcp_evaluation post-processing --summary
+uv run python -m mcp_evaluation post-processing
 uv run python -m mcp_evaluation post-processing --agent claude --verbose
 
 # Utilities
-uv run python -m mcp_evaluation models --preference fast
-uv run python -m mcp_evaluation test --agent opencode
+uv run python -m mcp_evaluation stats
+
+
+# Advanced commands
+uv run python -m mcp_evaluation setup
+uv run python -m mcp_evaluation batch 1 2 3 --agent both --skip-permissions
 ```
 
 ## 📊 Post-Processing
 
-Generate reports with dual processing modes:
-- **📊 CSV-Only (Default)**: Fast reports
-- **📝 Advanced Mode**: Reports + timeline logs (auto-enabled with filters)
+Process InfluxDB monitoring data and generate evaluation metrics with JSON reports.
 
 ### Key Options
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--summary` | Quick statistics only | `--summary` |
-| `--agent` | Filter by agent | `--agent claude` |
-| `--prompt` | Filter by prompt | `--prompt 1` |
-| `--all` | Process all with logs | `--all` |
-| `--verbose` | Detailed progress | `--verbose` |
+| `--output` / `-o` | Output directory | `--output reports/` |
+| `--agent` / `-a` | Filter by agent | `--agent claude` |
+| `--verbose` / `-v` | Detailed progress | `--verbose` |
 
 ### Examples
 ```bash
-# Quick summary
-uv run python -m mcp_evaluation post-processing --summary
-
-# Fast CSV report (default)
+# Basic post-processing (all sessions)
 uv run python -m mcp_evaluation post-processing
 
-# Advanced analysis with logs
+# Process with detailed output
+uv run python -m mcp_evaluation post-processing --verbose
+
+# Process only Claude sessions
 uv run python -m mcp_evaluation post-processing --agent claude --verbose
-uv run python -m mcp_evaluation post-processing --all --verbose
+
+# Process only OpenCode sessions  
+uv run python -m mcp_evaluation post-processing --agent opencode --verbose
+
+# Custom output directory
+uv run python -m mcp_evaluation post-processing --output custom_reports/ --verbose
 ```
 
 ## 🎯 Common Workflows
@@ -101,20 +114,20 @@ uv run python -m mcp_evaluation post-processing --all --verbose
 ```bash
 uv run python -m mcp_evaluation test --agent opencode
 uv run python -m mcp_evaluation run 1 --agent both --skip-permissions  
-uv run python -m mcp_evaluation post-processing --summary
+uv run python -m mcp_evaluation post-processing
 ```
 
 ### Full Evaluation
 ```bash
 uv run python -m mcp_evaluation run-all --agent both --skip-permissions
-uv run python -m mcp_evaluation post-processing --all --verbose
+uv run python -m mcp_evaluation post-processing --verbose
 ```
 
 ## 🔧 Agent Configuration
 
 ### Models
 **Claude:** `haiku` (fast), `sonnet` (balanced), `opus` (accurate)  
-**OpenCode:** `github-copilot/claude-3.5-sonnet`, `github-copilot/gpt-4o`
+**OpenCode:** `github-copilot/claude-3.5-sonnet`, `github-copilot/gpt-4o`, `github-copilot/claude-3.7-sonnet`
 
 ### Usage
 ```bash
@@ -132,8 +145,10 @@ uv run python -m mcp_evaluation post-processing --all --verbose
 │   ├── cli.py                   # Command interface
 │   ├── evaluation_engine.py     # Evaluation orchestration
 │   ├── unified_agent.py         # Agent interface
-│   ├── *_post_processing.py     # Report generation
-│   └── session_manager.py       # Database storage
+│   ├── post_processor.py        # Report generation
+│   ├── session_manager.py       # Database storage
+│   ├── jsonl_prompt_loader.py   # JSONL prompt loader
+│   └── prompt_loader.py         # Markdown prompt loader
 ├── prompts/                     
 │   ├── prompts_dataset.jsonl    # Primary prompts (7 total)
 │   └── backup_old_format/       # Backup .md files

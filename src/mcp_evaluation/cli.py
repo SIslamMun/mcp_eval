@@ -534,35 +534,6 @@ def batch(
 
 
 @main.command()
-@click.option("--output", "-o", default="evaluation_results", help="Output file prefix")
-@click.option("--format", "-f", type=click.Choice(["json", "csv"]), default="json", help="Output format")
-@click.option("--config", "-c", help="Configuration file path")
-def export(output: str, format: str, config: Optional[str]):
-    """Export evaluation results."""
-    console.print("[bold blue]Exporting evaluation results[/bold blue]\n")
-    
-    # Initialize engine
-    if config:
-        engine = EvaluationEngine(config_path=config)
-    else:
-        engine = EvaluationEngine()
-    
-    output_file = f"{output}.{format}"
-    
-    try:
-        exported_file = engine.export_evaluation_results(output_file, format)
-        console.print(f"✅ [green]Results exported to: {exported_file}[/green]")
-        
-        # Show statistics
-        stats = engine.get_evaluation_statistics()
-        console.print(f"📊 Exported {stats['total_sessions']} sessions")
-        
-    except Exception as e:
-        console.print(f"❌ [red]Export failed: {e}[/red]")
-        sys.exit(1)
-
-
-@main.command()
 @click.option("--agent", "-a", type=click.Choice(["claude", "opencode", "both"]), default="both", help="Agent to use")
 @click.option("--claude-model", default="sonnet", help="Claude model")
 @click.option("--opencode-model", default="github-copilot/claude-3.5-sonnet", help="OpenCode model")
@@ -777,48 +748,6 @@ def stats(config: Optional[str]):
             console.print(f"❌ [red]Error loading prompts: {fallback_e}[/red]")
         console.print(f"❌ [red]Failed to get statistics: {e}[/red]")
         sys.exit(1)
-
-
-@main.command()
-@click.argument("prompt_ids", nargs=-1, type=int)
-@click.option("--config", "-c", help="Configuration file path")
-def results(prompt_ids: List[int], config: Optional[str]):
-    """Display results for specific prompts."""
-    # Initialize engine
-    if config:
-        engine = EvaluationEngine(config_path=config)
-    else:
-        engine = EvaluationEngine()
-    
-    if not prompt_ids:
-        console.print("[red]Please specify at least one prompt ID[/red]")
-        sys.exit(1)
-    
-    for prompt_id in prompt_ids:
-        console.print(f"\n[bold blue]Results for Prompt {prompt_id}[/bold blue]")
-        
-        try:
-            results = engine.get_evaluation_results(prompt_id)
-            
-            if not results:
-                console.print(f"[yellow]No results found for prompt {prompt_id}[/yellow]")
-                continue
-            
-            # Group by base session ID for comparative display
-            session_groups = {}
-            for result in results:
-                if result.base_session_id not in session_groups:
-                    session_groups[result.base_session_id] = []
-                session_groups[result.base_session_id].append(result)
-            
-            for base_session_id, session_results in session_groups.items():
-                console.print(f"\n[cyan]Session: {base_session_id}[/cyan]")
-                
-                for result in session_results:
-                    display_single_result(result, show_session=False)
-                    
-        except Exception as e:
-            console.print(f"❌ [red]Error getting results for prompt {prompt_id}: {e}[/red]")
 
 
 @main.command("post-processing")
