@@ -49,7 +49,7 @@ class EvaluationConfig(BaseModel):
     session_id_format: str = "eval_prompt{prompt_id:03d}_{timestamp}"
     
     # Database backend selection
-    backend: str = "influxdb"  # Default to InfluxDB, can be "influxdb" or "sqlite"
+    backend: str = "sqlite"  # SQLite only backend
     
     # InfluxDB configuration (default enabled)
     influxdb_url: str = "http://localhost:8086"
@@ -127,23 +127,9 @@ class EvaluationEngine:
         self.prompt_loader = UnifiedPromptLoader(self.config.prompts_dir)
         
         # Create session manager based on backend configuration
-        if self.config.backend == "sqlite":
-            from .session_manager import SQLiteSessionManager
-            self.session_manager = SQLiteSessionManager(self.config.db_path)
-        else:  # influxdb (default)
-            from .session_manager import InfluxDBSessionManager
-            try:
-                self.session_manager = InfluxDBSessionManager(
-                    db_path=self.config.db_path,
-                    influxdb_url=self.config.influxdb_url,
-                    influxdb_token=self.config.influxdb_token,
-                    influxdb_org=self.config.influxdb_org,
-                    influxdb_bucket=self.config.influxdb_bucket
-                )
-            except Exception as e:
-                logger.warning(f"Failed to initialize InfluxDB, falling back to SQLite: {e}")
-                from .session_manager import SQLiteSessionManager
-                self.session_manager = SQLiteSessionManager(self.config.db_path)
+        # Always use in-memory storage - no persistent data storage
+        from .session_manager import InMemorySessionManager
+        self.session_manager = InMemorySessionManager()
     
     def _load_config(self, config_path: str) -> EvaluationConfig:
         """Load configuration from YAML file."""
@@ -204,8 +190,12 @@ class EvaluationEngine:
         # Execute with session management
         start_time = time.time()
         try:
+            # Inject actual model name into prompt content for tracking
+            actual_model = agent_config.get("model", "unknown")
+            enhanced_prompt = f"<!-- EVAL_MODEL:{actual_model} -->\n{prompt.content}"
+            
             result = agent.execute_with_session_management(
-                prompt=prompt.content,
+                prompt=enhanced_prompt,
                 base_session_id=base_session_id,
                 continue_conversation=agent_config.get("continue_session", False),
                 **{k: v for k, v in agent_config.items() if k not in ["type", "model", "continue_session"]}

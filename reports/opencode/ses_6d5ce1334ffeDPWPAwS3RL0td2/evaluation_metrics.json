@@ -1,0 +1,27 @@
+{
+  "generated_at": "2025-09-08T12:18:06.436953",
+  "session_metrics": {
+    "number": 6,
+    "prompt": "2",
+    "session_id": "ses_6d5ce1334ffeDPWPAwS3RL0td2",
+    "agent_type": "opencode",
+    "model": "github-copilot/claude-3.5-sonnet",
+    "success": true,
+    "execution_time": 56.935,
+    "number_of_calls": 8,
+    "number_of_tool_calls": 8,
+    "tools_used": [
+      "node_hardware_health_check",
+      "node_hardware_get_cpu_info",
+      "node_hardware_get_disk_info",
+      "node_hardware_get_memory_info",
+      "todowrite"
+    ],
+    "cost_usd": null,
+    "response_length": 262,
+    "created_at": "2025-09-08T16:38:59.028000+00:00",
+    "completed_at": "2025-09-08T16:39:55.963000+00:00",
+    "logfile": "/home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/evaluation_plan_execution/reports/opencode_ses_6d5ce1334ffeDPWPAwS3RL0td2_monitoring.log",
+    "error_message": null
+  }
+}

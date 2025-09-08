@@ -244,18 +244,6 @@ tags: ["sample", "testing"]
 
 This is a sample prompt for evaluating MCP (Model Context Protocol) functionality.
 
-## Task
-Please list the available MCP tools and demonstrate basic functionality.
-
-## Expected Behavior
-- Agent should discover available MCP servers
-- Agent should list available tools/resources
-- Agent should successfully execute at least one MCP command
-
-## Success Criteria
-- Response includes MCP server information
-- Response shows tool usage
-- No errors in MCP communication
 """
 
         sample_file = output_dir / f"{prompt_id:03d}.md"

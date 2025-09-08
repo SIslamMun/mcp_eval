@@ -19,7 +19,6 @@ from rich.progress import track
 
 from . import EvaluationEngine, MarkdownPromptLoader, SessionManager
 from .evaluation_engine import EvaluationConfig
-from .unified_post_processing import UnifiedPostProcessor
 
 
 console = Console()
@@ -287,7 +286,6 @@ def test(agent: str, skip_permissions: bool):
 @click.option("--claude-models", help="Multiple Claude models (comma-separated): sonnet,haiku,opus")
 @click.option("--opencode-models", help="Multiple OpenCode models (comma-separated): github-copilot/claude-3.5-sonnet,mistral:latest")
 @click.option("--config", "-c", help="Configuration file path")
-@click.option("--backend", "-b", type=click.Choice(["influxdb", "sqlite"]), default="influxdb", help="Database backend (default: influxdb)")
 @click.option("--continue-session", is_flag=True, help="Continue previous session")
 @click.option("--skip-permissions", is_flag=True, help="Skip Claude permissions (for sandboxes only)")
 def run(
@@ -298,7 +296,6 @@ def run(
     claude_models: Optional[str],
     opencode_models: Optional[str],
     config: Optional[str],
-    backend: str,
     continue_session: bool,
     skip_permissions: bool
 ):
@@ -309,10 +306,8 @@ def run(
     if config:
         engine = EvaluationEngine(config_path=config)
     else:
-        # Create engine with backend override
-        from .evaluation_engine import EvaluationConfig
-        config_obj = EvaluationConfig(backend=backend)
-        engine = EvaluationEngine(config=config_obj)
+        # Create engine with in-memory storage
+        engine = EvaluationEngine()
 
     # Validate models and provide suggestions
     from .unified_agent import UnifiedAgent
@@ -572,7 +567,6 @@ def export(output: str, format: str, config: Optional[str]):
 @click.option("--claude-model", default="sonnet", help="Claude model")
 @click.option("--opencode-model", default="github-copilot/claude-3.5-sonnet", help="OpenCode model")
 @click.option("--config", "-c", help="Configuration file path")
-@click.option("--backend", "-b", type=click.Choice(["influxdb", "sqlite"]), default="influxdb", help="Database backend (default: influxdb)")
 @click.option("--continue-sessions", is_flag=True, help="Continue sessions between prompts")
 @click.option("--skip-permissions", is_flag=True, help="Skip Claude permissions (for sandboxes only)")
 @click.option("--complexity", type=click.Choice(["low", "medium", "high"]), help="Filter by complexity level")
@@ -689,64 +683,98 @@ def run_all(
 
 @main.command()
 @click.option("--config", "-c", help="Configuration file path")
-@click.option("--backend", "-b", type=click.Choice(["influxdb", "sqlite"]), default="influxdb", help="Database backend (default: influxdb)")
-def stats(config: Optional[str], backend: str):
-    """Display evaluation statistics."""
+def stats(config: Optional[str]):
+    """Display evaluation statistics from InfluxDB data."""
     console.print("[bold blue]Evaluation Statistics[/bold blue]\n")
     
-    # Initialize engine
+    # Initialize prompt loader for prompt data
     if config:
         engine = EvaluationEngine(config_path=config)
     else:
-        # Create engine with backend override
-        from .evaluation_engine import EvaluationConfig
-        config_obj = EvaluationConfig(backend=backend)
-        engine = EvaluationEngine(config=config_obj)
         engine = EvaluationEngine()
+        
+    # Get prompt information from engine
+    prompt_data_dict = engine.prompt_loader.load_all_prompts()
+    prompt_data = list(prompt_data_dict.values())
     
     try:
-        stats = engine.get_evaluation_statistics()
+        # Use PostProcessor to get real statistics from InfluxDB
+        from .post_processor import PostProcessor
+        
+        processor = PostProcessor()
+        
+        # Extract sessions without processing them
+        claude_sessions = processor.extract_claude_sessions()
+        opencode_sessions = processor._extract_opencode_sessions()
+        all_sessions = claude_sessions + opencode_sessions
+        
+        # Calculate statistics from real InfluxDB data
+        total_sessions = len(all_sessions)
+        claude_count = len(claude_sessions)
+        opencode_count = len(opencode_sessions)
+        
+        # Recent sessions (last 24 hours)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        recent_sessions = 0
+        total_cost = 0.0
+        costs = []
+        
+        # Agent distribution
+        agent_distribution = {'claude': claude_count, 'opencode': opencode_count}
         
         # Create statistics table
         table = Table(title="Session Statistics")
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="magenta")
         
-        table.add_row("Total Sessions", str(stats["total_sessions"]))
-        table.add_row("Comparative Sessions", str(stats["total_comparative_sessions"]))
-        table.add_row("Total Prompts", str(stats["total_prompts"]))
-        table.add_row("Database Size (MB)", f"{stats['database_size_mb']:.2f}")
-        table.add_row("Recent Sessions (24h)", str(stats["recent_sessions_24h"]))
-        table.add_row("Average Cost (USD)", f"${stats['average_cost_usd']:.4f}")
+        table.add_row("Total Sessions", str(total_sessions))
+        table.add_row("Claude Sessions", str(claude_count))
+        table.add_row("OpenCode Sessions", str(opencode_count))
+        table.add_row("Total Prompts", str(len(prompt_data)))
+        table.add_row("Database Type", "InfluxDB")
         
         console.print(table)
         
         # Agent distribution
-        if stats.get("agent_distribution"):
-            console.print("\n[bold]Agent Distribution:[/bold]")
-            for agent, count in stats["agent_distribution"].items():
-                console.print(f"  • {agent}: {count} sessions")
+        console.print("\n[bold]Agent Distribution:[/bold]")
+        for agent, count in agent_distribution.items():
+            console.print(f"  • {agent}: {count} sessions")
         
-        # Success rates
-        if stats.get("success_rates"):
-            console.print("\n[bold]Success Rates:[/bold]")
-            for agent, rate_data in stats["success_rates"].items():
-                rate = rate_data["rate"] * 100
-                console.print(f"  • {agent}: {rate:.1f}% ({rate_data['success']}/{rate_data['total']})")
+        # Prompt complexity distribution
+        complexity_distribution = {}
+        for prompt in prompt_data:
+            # prompt is a PromptData object, access its attributes directly
+            complexity = getattr(prompt, 'complexity', 'unknown')
+            complexity_distribution[complexity] = complexity_distribution.get(complexity, 0) + 1
         
-        # Prompt complexity
-        if stats.get("prompt_complexity_distribution"):
+        if complexity_distribution:
             console.print("\n[bold]Prompt Complexity Distribution:[/bold]")
-            for complexity, count in stats["prompt_complexity_distribution"].items():
+            for complexity, count in complexity_distribution.items():
                 console.print(f"  • {complexity}: {count} prompts")
         
         # MCP targets
-        if stats.get("mcp_targets"):
-            console.print(f"\n[bold]MCP Targets ({len(stats['mcp_targets'])}):[/bold]")
-            for target in stats["mcp_targets"]:
+        mcp_targets = set()
+        for prompt in prompt_data:
+            target = getattr(prompt, 'mcp_target', None)
+            if target:
+                mcp_targets.add(target)
+        
+        if mcp_targets:
+            console.print(f"\n[bold]MCP Targets ({len(mcp_targets)}):[/bold]")
+            for target in mcp_targets:
                 console.print(f"  • {target}")
         
     except Exception as e:
+        console.print(f"❌ [red]Error getting statistics: {e}[/red]")
+        # Fallback to showing basic prompt info
+        try:
+            prompt_data_dict = engine.prompt_loader.load_all_prompts()
+            prompt_data = list(prompt_data_dict.values())
+            console.print(f"\n[yellow]Showing basic prompt information only:[/yellow]")
+            console.print(f"Total Prompts: {len(prompt_data)}")
+        except Exception as fallback_e:
+            console.print(f"❌ [red]Error loading prompts: {fallback_e}[/red]")
         console.print(f"❌ [red]Failed to get statistics: {e}[/red]")
         sys.exit(1)
 
@@ -795,132 +823,69 @@ def results(prompt_ids: List[int], config: Optional[str]):
 
 @main.command("post-processing")
 @click.option("--output", "-o", default="reports/", help="Output directory (default: reports/)")
-@click.option("--format", "-f", type=click.Choice(["csv", "json"]), default="csv", help="Report format (default: csv)")
-@click.option("--backend", "-b", type=click.Choice(["influxdb", "sqlite"]), default="influxdb", help="Database backend (default: influxdb)")
-@click.option("--summary", is_flag=True, help="Show summary statistics only")
-# Analysis modes (mutually exclusive)
-@click.option("--all", "mode_all", is_flag=True, help="Process all sessions with detailed analysis")
-@click.option("--prompt", "mode_prompt", type=int, help="Process sessions for specific prompt ID")
-@click.option("--prompts", "mode_prompts", help="Process sessions for multiple prompts (comma-separated)")
-@click.option("--agent", "mode_agent", type=click.Choice(["claude", "opencode"]), help="Process sessions for specific agent")
-@click.option("--prompt-agent", "mode_prompt_agent", help="Process sessions for prompt+agent (format: 'prompt_id:agent_type')")
-# Output modes
-@click.option("--with-logs", is_flag=True, help="Include detailed timeline logs (comprehensive)")
-@click.option("--comprehensive", is_flag=True, help="Generate comprehensive report with all analysis")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed progress and results")
-@click.option("--config", "-c", help="Configuration file path")
+@click.option("--agent", "-a", type=click.Choice(['claude', 'opencode']), help="Filter by agent type (claude or opencode)")
 def post_processing(
     output: str,
-    format: str, 
-    backend: str,
-    summary: bool,
-    mode_all: bool,
-    mode_prompt: Optional[int],
-    mode_prompts: Optional[str],
-    mode_agent: Optional[str],
-    mode_prompt_agent: Optional[str],
-    with_logs: bool,
-    comprehensive: bool,
     verbose: bool,
-    config: Optional[str]
+    agent: Optional[str]
 ):
-    """Unified post-processing engine for MCP evaluation reports.
+    """Process InfluxDB monitoring data and generate evaluation metrics.
     
-    Supports both fast CSV-only reports and comprehensive analysis with detailed timelines.
+    This command processes all evaluation sessions from InfluxDB and generates
+    individual session reports with metrics in JSON format.
     """
-    console.print("[bold blue]� MCP Evaluation Post-Processing Engine[/bold blue]\n")
+    console.print("[bold blue]🔄 MCP Evaluation Post-Processing[/bold blue]\n")
     
     try:
-        # Determine output mode - default is CSV-only unless --with-logs specified
-        if not with_logs:
-            # Default behavior based on analysis mode
-            if mode_all or mode_prompt is not None or mode_prompts or mode_agent or mode_prompt_agent or comprehensive:
-                with_logs = True  # Advanced analysis modes default to detailed logs
-                console.print("[cyan]💡 Advanced analysis mode detected - enabling detailed logs by default[/cyan]")
-            else:
-                console.print("[cyan]💡 Default mode - generating CSV report only[/cyan]")
+        from .post_processor import PostProcessor
         
-        # Show summary statistics if requested
-        if summary:
-            from .unified_post_processing import UnifiedPostProcessor
-            engine = UnifiedPostProcessor(
-                backend=backend,
-                output_dir=output,
-                config_path=config
-            )
-            
-            console.print("[bold]� Data Summary Statistics:[/bold]")
-            stats = engine.generate_summary_statistics(verbose=verbose)
-            
-            if "error" in stats:
-                console.print(f"❌ [red]Error: {stats['error']}[/red]")
-                return
-            
-            # Display statistics table
-            stats_table = Table(title="Evaluation Data Summary")
-            stats_table.add_column("Metric", style="cyan")
-            stats_table.add_column("Value", style="green")
-            
-            stats_table.add_row("Total Records", str(stats['total_sessions']))
-            stats_table.add_row("Successful Records", str(stats['successful_sessions']))
-            stats_table.add_row("Success Rate", f"{stats['success_rate']:.2f}%")
-            stats_table.add_row("Database Backend", stats['database_backend'])
-            stats_table.add_row("Total Cost (USD)", f"${stats['total_cost_usd']:.4f}")
-            stats_table.add_row("Average Cost (USD)", f"${stats['average_cost_usd']:.4f}")
-            stats_table.add_row("Average Execution Time", f"{stats['average_execution_time']:.2f}s")
-            
-            console.print(stats_table)
-            
-            # Agent distribution
-            if stats['agent_distribution']:
-                console.print("\n[bold]Agent Distribution:[/bold]")
-                for agent, count in stats['agent_distribution'].items():
-                    console.print(f"  • {agent}: {count} sessions")
-            
-            # Prompt distribution
-            if stats['prompt_distribution']:
-                console.print("\n[bold]Prompt Distribution:[/bold]")
-                for prompt_id, count in sorted(stats['prompt_distribution'].items()):
-                    console.print(f"  • Prompt {prompt_id}: {count} sessions")
-            return
+        # Initialize post processor
+        processor = PostProcessor(output_dir=output)
         
-        # Choose processing mode
-        if not with_logs:
-            # Use CSV-only post-processing engine (default)
-            console.print("[bold cyan]📊 CSV-Only Mode: Fast report generation[/bold cyan]")
-            result = _run_csv_processing(
-                output, format, backend, config, verbose
-            )
+        if verbose:
+            console.print(f"[cyan]Output Directory:[/cyan] {output}")
+            console.print(f"[cyan]InfluxDB URL:[/cyan] {processor.config['INFLUXDB_URL']}")
+            console.print(f"[cyan]Database:[/cyan] {processor.config['INFLUXDB_BUCKET']}")
+            if agent:
+                console.print(f"[cyan]Agent Filter:[/cyan] {agent}")
+            console.print()
+        
+        # Run the processing with agent filtering
+        if agent:
+            console.print(f"[bold]🚀 Processing InfluxDB monitoring data for {agent} sessions...[/bold]")
+            if agent == 'claude':
+                # Extract and process only Claude sessions
+                claude_sessions = processor.extract_claude_sessions()
+                console.print(f"📊 Found {len(claude_sessions)} Claude sessions to process")
+                
+                session_results = []
+                for i, session in enumerate(claude_sessions, 1):
+                    session_result = processor.process_single_session(session, i)
+                    session_results.append(session_result)
+                
+                results = {"sessions": session_results, "total": len(claude_sessions)}
+                
+            elif agent == 'opencode':
+                # Extract and process only OpenCode sessions
+                opencode_sessions = processor._extract_opencode_sessions()
+                console.print(f"📊 Found {len(opencode_sessions)} OpenCode sessions to process")
+                
+                session_results = []
+                for i, session in enumerate(opencode_sessions, 1):
+                    session_result = processor.process_single_session(session, i)
+                    session_results.append(session_result)
+                
+                results = {"sessions": session_results, "total": len(opencode_sessions)}
         else:
-            # Use advanced post-processing with detailed analysis
-            console.print("[bold green]🔍 Advanced Mode: Detailed analysis with timelines[/bold green]")
-            result = _run_advanced_processing(
-                output, backend, mode_all, mode_prompt, mode_prompts, 
-                mode_agent, mode_prompt_agent,
-                comprehensive, verbose, config
-            )
-            
-            # If advanced processing fails, suggest default mode fallback
-            if result and result.get("error"):
-                console.print(f"[yellow]⚠️  Advanced analysis failed: {result['error']}[/yellow]")
-                console.print("[cyan]💡 Tip: Use default mode for fast CSV reports that always work[/cyan]")
-                console.print("[cyan]    Example: uv run python -m mcp_evaluation post-processing --prompt 1[/cyan]")
-                return result
+            console.print("[bold]🚀 Processing all InfluxDB monitoring data...[/bold]")
+            results = processor.process_all()
         
-        # Show completion message
-        if result and not result.get("error"):
-            console.print(f"\n[bold green]✅ Post-processing completed successfully![/bold green]")
-        elif result and result.get("error"):
-            console.print(f"[red]❌ Post-processing failed: {result['error']}[/red]")
+        # Close the connection
+        processor.close()
         
-        # Usage tips
-        console.print(f"\n[bold yellow]💡 Usage Examples:[/bold yellow]")
-        console.print("  # Fast CSV reports (default):")
-        console.print("  uv run python -m mcp_evaluation post-processing --agent claude")
-        console.print("  # Detailed analysis with logs:")
-        console.print("  uv run python -m mcp_evaluation post-processing --with-logs --prompt 1 --verbose")
-        console.print("  # Comprehensive analysis:")
-        console.print("  uv run python -m mcp_evaluation post-processing --all --comprehensive --verbose")
+        console.print(f"\n[bold green]✅ Post-processing completed successfully![/bold green]")
+        console.print(f"[cyan]Reports generated in:[/cyan] {output}")
         
     except Exception as e:
         console.print(f"[red]❌ Post-processing failed: {e}[/red]")
@@ -928,234 +893,7 @@ def post_processing(
         sys.exit(1)
 
 
-def _run_csv_processing(
-    output: str,
-    format: str, 
-    backend: str,
-    config: Optional[str],
-    verbose: bool
-) -> Dict[str, Any]:
-    """Run CSV-only post-processing using the unified engine."""
-    from .unified_post_processing import UnifiedPostProcessor
-    
-    # Initialize unified post-processing engine
-    engine = UnifiedPostProcessor(
-        backend=backend,
-        output_dir=output,
-        config_path=config
-    )
-    
-    # Show applied filters
-    if verbose:
-        console.print("[bold]🔍 Applied Filters:[/bold]")
-        console.print(f"  • Database Backend: {backend}")
-        console.print(f"  • Output Format: {format}")
-        console.print(f"  • Output Directory: {output}")
-        console.print(f"  • Mode: CSV Reports Only")
-        console.print()
-    
-    # Generate report using unified engine
-    console.print("[bold]🚀 Generating CSV Report...[/bold]")
-    
-    generated_files = engine.generate_csv_report(
-        output_format=format,
-        verbose=verbose
-    )
-    
-    # Display results
-    console.print("\n[bold green]✅ CSV Report Generation Complete![/bold green]")
-    
-    results_table = Table(title="Generated Files")
-    results_table.add_column("Type", style="cyan")
-    results_table.add_column("Location", style="green")
-    
-    for file_type, path in generated_files.items():
-        results_table.add_row(file_type.upper(), str(path))
-    
-    console.print(results_table)
-    
-    # Show quick preview of CSV if generated
-    if 'csv' in generated_files and verbose:
-        console.print(f"\n[bold]📄 CSV Report Preview:[/bold]")
-        
-        try:
-            # Read first few lines of CSV for preview
-            import csv as csv_module
-            with open(generated_files['csv'], 'r', encoding='utf-8') as f:
-                reader = csv_module.reader(f)
-                headers = next(reader)
-                rows = []
-                for i, row in enumerate(reader):
-                    if i >= 3:  # Show first 3 data rows
-                        break
-                    rows.append(row)
-            
-            preview_table = Table(show_lines=True)
-            for header in headers[:8]:  # Show first 8 columns
-                preview_table.add_column(header, style="dim")
-            
-            for row in rows:
-                preview_table.add_row(*[str(cell) for cell in row[:8]])
-            
-            console.print(preview_table)
-            console.print(f"[dim]... showing first 3 rows and 8 columns[/dim]")
-        except Exception as e:
-            console.print(f"[dim]Could not show preview: {e}[/dim]")
-    
-    return {"generated_files": generated_files, "success": True}
-
-
-def _run_advanced_processing(
-    output: str,
-    backend: str,
-    mode_all: bool,
-    mode_prompt: Optional[int],
-    mode_prompts: Optional[str],
-    mode_agent: Optional[str],
-    mode_prompt_agent: Optional[str],
-    comprehensive: bool,
-    verbose: bool,
-    config: Optional[str]
-) -> Dict[str, Any]:
-    """Run advanced post-processing with detailed analysis and timelines."""
-    try:
-        from .unified_post_processing import UnifiedPostProcessor
-        
-        # Initialize unified post-processor
-        processor = UnifiedPostProcessor(
-            backend=backend,
-            output_dir=output,
-            config_path=config
-        )
-        
-        # Count active mode flags - prioritize explicit analysis modes
-        explicit_modes = [mode_all, bool(mode_prompt), bool(mode_prompts), bool(mode_agent), bool(mode_prompt_agent)]
-        active_explicit_modes = sum(explicit_modes)
-        
-        result = {}
-        
-        if active_explicit_modes == 0:
-            # No explicit analysis mode - default to processing all
-            if verbose:
-                console.print("[cyan]🔄 No specific mode selected - processing all sessions with detailed analysis...[/cyan]")
-            result = processor.process_all_sessions(verbose=verbose)
-            
-        elif active_explicit_modes > 1:
-            console.print("[red]❌ Please specify only one analysis mode[/red]")
-            return {"error": "Multiple analysis modes specified"}
-        
-        else:
-            # Handle explicit analysis modes
-            if mode_all:
-                if verbose:
-                    console.print("[cyan]🔄 Processing all sessions with detailed analysis...[/cyan]")
-                result = processor.process_all_sessions(verbose=verbose)
-                
-            elif mode_prompt is not None:
-                if verbose:
-                    console.print(f"[cyan]🔄 Processing sessions for prompt {mode_prompt}...[/cyan]")
-                result = processor.process_by_prompt(mode_prompt, verbose=verbose)
-                
-            elif mode_prompts:
-                try:
-                    prompt_list = [int(p.strip()) for p in mode_prompts.split(',')]
-                    if verbose:
-                        console.print(f"[cyan]🔄 Processing sessions for prompts {prompt_list}...[/cyan]")
-                    result = processor.process_by_prompts(prompt_list, verbose=verbose)
-                except ValueError:
-                    console.print(f"[red]❌ Invalid prompts format: {mode_prompts}[/red]")
-                    return {"error": "Invalid prompts format"}
-                
-            elif mode_agent:
-                if verbose:
-                    console.print(f"[cyan]🔄 Processing sessions for agent {mode_agent}...[/cyan]")
-                result = processor.process_by_agent(mode_agent, verbose=verbose)
-                
-            elif mode_prompt_agent:
-                try:
-                    parts = mode_prompt_agent.split(':')
-                    if len(parts) != 2:
-                        raise ValueError("Invalid format")
-                    prompt_id = int(parts[0])
-                    agent_type = parts[1]
-                    if agent_type not in ['claude', 'opencode']:
-                        raise ValueError("Invalid agent type")
-                    
-                    if verbose:
-                        console.print(f"[cyan]🔄 Processing sessions for prompt {prompt_id} + agent {agent_type}...[/cyan]")
-                    result = processor.process_by_prompt_and_agent(prompt_id, agent_type, verbose=verbose)
-                except ValueError:
-                    console.print(f"[red]❌ Invalid prompt-agent format: {mode_prompt_agent}[/red]")
-                    console.print("Use format: 'prompt_id:agent_type' (e.g., '1:claude' or '2:opencode')")
-                    return {"error": "Invalid prompt-agent format"}
-        
-        # Generate comprehensive report if requested
-        if comprehensive:
-            if verbose:
-                console.print("[cyan]🔄 Generating comprehensive report...[/cyan]")
-            
-            # Extract filters from mode parameters for comprehensive report
-            comp_filter_agent = mode_agent
-            comp_filter_prompt = None
-            
-            if mode_prompt is not None:
-                comp_filter_prompt = [mode_prompt]
-            elif mode_prompts:
-                try:
-                    comp_filter_prompt = [int(p.strip()) for p in mode_prompts.split(',')]
-                except ValueError:
-                    pass
-            elif mode_prompt_agent:
-                try:
-                    parts = mode_prompt_agent.split(':')
-                    comp_filter_prompt = [int(parts[0])]
-                    comp_filter_agent = parts[1]
-                except ValueError:
-                    pass
-            
-            comprehensive_result = processor.generate_comprehensive_report(
-                filter_agent=comp_filter_agent,
-                filter_prompt=comp_filter_prompt,
-                verbose=verbose
-            )
-            
-            if "error" not in comprehensive_result:
-                console.print("[bold green]✅ Comprehensive report generated successfully![/bold green]")
-                console.print(f"[cyan]Report Directory:[/cyan] {comprehensive_result['report_directory']}")
-                console.print(f"[cyan]Report File:[/cyan] {comprehensive_result['report_file']}")
-                result["comprehensive_report"] = comprehensive_result
-            else:
-                console.print(f"[red]❌ Comprehensive report failed: {comprehensive_result['error']}[/red]")
-        
-        # Show result summary if not already shown
-        if result and not result.get("error") and not verbose:
-            console.print(f"\n[bold green]✅ Advanced Analysis Complete![/bold green]")
-            console.print(f"[cyan]Total Sessions Processed:[/cyan] {result.get('total_sessions', 0)}")
-            console.print(f"[cyan]Successful Analyses:[/cyan] {result.get('successful', 0)}")
-            console.print(f"[cyan]Failed Analyses:[/cyan] {result.get('failed', 0)}")
-            
-            # Show generated files
-            if "results" in result and result["results"]:
-                timeline_count = sum(1 for r in result["results"] if "timeline_file" in r and r["timeline_file"])
-                metrics_count = sum(1 for r in result["results"] if "metrics_file" in r)
-                
-                console.print(f"\n[bold]📄 Generated Files:[/bold]")
-                console.print(f"  • Timeline Files: {timeline_count}")
-                console.print(f"  • Metrics Files: {metrics_count}")
-                console.print(f"  • Output Directory: {output}")
-        
-        return result
-        
-    except ImportError as e:
-        console.print(f"[red]❌ Failed to import advanced post-processing module: {e}[/red]")
-        console.print("[dim]Make sure all dependencies are installed[/dim]")
-        return {"error": f"Import error: {e}"}
-    except Exception as e:
-        console.print(f"[red]❌ Advanced post-processing failed: {e}[/red]")
-        logger.exception("Advanced post-processing failed")
-        return {"error": str(e)}
-
-
+# Helper functions
 def display_single_result(result, show_session: bool = True):
     """Display a single evaluation result."""
     status_color = "green" if result.success else "red"

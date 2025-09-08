@@ -79,15 +79,16 @@ class JSONLPromptLoader:
         self._loaded = True
         print(f"📖 Loaded {len(self._prompt_cache)} prompts from {self.jsonl_file}")
     
-    def load_prompt(self, prompt_id: int) -> PromptData:
+    def load_prompt(self, prompt_id: int, inject_id: bool = True) -> PromptData:
         """
         Load prompt by ID from JSONL file.
         
         Args:
             prompt_id: Prompt identifier
+            inject_id: Whether to inject prompt ID into content for tracking
             
         Returns:
-            PromptData with metadata and content
+            PromptData with metadata and content (with optional ID injection)
             
         Raises:
             FileNotFoundError: If JSONL file not found
@@ -99,7 +100,20 @@ class JSONLPromptLoader:
             available_ids = sorted(self._prompt_cache.keys())
             raise ValueError(f"Prompt {prompt_id} not found. Available IDs: {available_ids}")
             
-        return self._prompt_cache[prompt_id]
+        prompt_data = self._prompt_cache[prompt_id]
+        
+        if inject_id:
+            # Inject prompt ID as HTML comment at the beginning of content
+            # This allows the processor to extract it later from database logs
+            injected_content = f"<!-- EVAL_PROMPT_ID:{prompt_id} -->\n{prompt_data.content}"
+            
+            # Create a copy with injected content
+            return PromptData(
+                metadata=prompt_data.metadata,
+                content=injected_content
+            )
+        
+        return prompt_data
     
     def load_all_prompts(self) -> Dict[int, PromptData]:
         """
@@ -358,13 +372,19 @@ class UnifiedPromptLoader:
             self.md_loader = MarkdownPromptLoader(str(self.prompts_dir))
             print(f"📝 Using Markdown prompt sources from: {self.prompts_dir}")
     
-    def load_prompt(self, prompt_id: int) -> PromptData:
+    def load_prompt(self, prompt_id: int, inject_id: bool = True) -> PromptData:
         """Load prompt by ID from preferred source."""
         if self.use_jsonl:
-            return self.jsonl_loader.load_prompt(prompt_id)
+            return self.jsonl_loader.load_prompt(prompt_id, inject_id=inject_id)
         else:
             # Convert from old format
             old_prompt = self.md_loader.load_prompt(prompt_id)
+            
+            content = old_prompt.content
+            if inject_id:
+                # Inject prompt ID as HTML comment for tracking
+                content = f"<!-- EVAL_PROMPT_ID:{prompt_id} -->\n{content}"
+            
             return PromptData(
                 metadata=PromptMetadata(
                     id=old_prompt.metadata.id,
@@ -377,7 +397,7 @@ class UnifiedPromptLoader:
                     expected_tools=old_prompt.metadata.expected_tools,
                     tags=old_prompt.metadata.tags
                 ),
-                content=old_prompt.content
+                content=content
             )
     
     def load_all_prompts(self) -> Dict[int, PromptData]:
