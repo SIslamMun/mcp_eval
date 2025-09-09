@@ -26,6 +26,13 @@ try:
 except ImportError:
     INFLUXDB_AVAILABLE = False
 
+# Semantic analysis import
+try:
+    from .semantic_analyzer import SemanticAnalysisEngine, SemanticAnalysis
+    SEMANTIC_ANALYSIS_AVAILABLE = True
+except ImportError:
+    SEMANTIC_ANALYSIS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +70,13 @@ def load_influxdb_config() -> Dict[str, str]:
         # Error message templates
         "ERROR_NO_TOOLS": config.get("POST_PROCESSING_ERROR_NO_TOOLS", "No tool calls executed - session completed without using any tools"),
         "ERROR_INCOMPLETE_TOOLS": config.get("POST_PROCESSING_ERROR_INCOMPLETE_TOOLS", "Tool calls initiated but no tools completed successfully"),
-        "ERROR_GENERAL_FAILURE": config.get("POST_PROCESSING_ERROR_GENERAL_FAILURE", "Session failed despite tool execution")
+        "ERROR_GENERAL_FAILURE": config.get("POST_PROCESSING_ERROR_GENERAL_FAILURE", "Session failed despite tool execution"),
+        # Semantic analysis configuration
+        "SEMANTIC_ANALYSIS_ENABLED": config.get("SEMANTIC_ANALYSIS_ENABLED", "false").lower() == "true",
+        "SEMANTIC_ANALYSIS_MODEL": config.get("SEMANTIC_ANALYSIS_MODEL", "sonnet"),
+        "SEMANTIC_ANALYSIS_CONFIDENCE_THRESHOLD": float(config.get("SEMANTIC_ANALYSIS_CONFIDENCE_THRESHOLD", "0.7")),
+        "SEMANTIC_ANALYSIS_MAX_COST_PER_SESSION": float(config.get("SEMANTIC_ANALYSIS_MAX_COST_PER_SESSION", "0.05")),
+        "SEMANTIC_ANALYSIS_BATCH_SIZE": int(config.get("SEMANTIC_ANALYSIS_BATCH_SIZE", "5"))
     }
 
 
@@ -82,6 +95,7 @@ class EvaluationMetrics:
     tools_used: List[str] = None  # Tools and call counts
     cost_usd: Optional[float] = None  # Cost in USD (Claude only)
     response_length: int = 0  # Response text length
+    response_content: Optional[str] = None  # Actual response content
     created_at: str = ""  # Session start timestamp
     completed_at: str = ""  # Session end timestamp
     logfile: str = ""  # Path to communication log
@@ -195,7 +209,7 @@ class PostProcessor:
                 
         return None
     
-    def __init__(self, output_dir: str = None, time_window_hours: int = None):
+    def __init__(self, output_dir: str = None, time_window_hours: int = None, enable_semantic_analysis: bool = None):
         """Initialize the processor."""
         if not INFLUXDB_AVAILABLE:
             raise ImportError("InfluxDB client not available. Install with: pip install influxdb-client")
@@ -210,6 +224,26 @@ class PostProcessor:
         # Use provided time window or config value or fallback
         self.time_window_hours = time_window_hours or self.config.get("TIME_WINDOW_HOURS", self.FALLBACK_TIME_WINDOW_HOURS)
         
+        # Semantic analysis setup
+        if enable_semantic_analysis is None:
+            self.semantic_enabled = self.config.get("SEMANTIC_ANALYSIS_ENABLED", False)
+        else:
+            self.semantic_enabled = enable_semantic_analysis
+            
+        self.semantic_engine = None
+        if self.semantic_enabled:
+            if not SEMANTIC_ANALYSIS_AVAILABLE:
+                print("⚠️  Semantic analysis requested but not available. Install dependencies.")
+                self.semantic_enabled = False
+            else:
+                try:
+                    semantic_model = self.config.get("SEMANTIC_ANALYSIS_MODEL", "sonnet")
+                    self.semantic_engine = SemanticAnalysisEngine(claude_model=semantic_model, config=self.config)
+                    print(f"🧠 Semantic analysis enabled with model: {semantic_model}")
+                except Exception as e:
+                    print(f"⚠️  Failed to initialize semantic analysis: {e}")
+                    self.semantic_enabled = False
+        
         # Connect to InfluxDB
         self.client = InfluxDBClient(
             url=self.config["INFLUXDB_URL"],
@@ -222,6 +256,8 @@ class PostProcessor:
         print(f"📊 Bucket: {self.config['INFLUXDB_BUCKET']}")
         print(f"🏢 Org: {self.config['INFLUXDB_ORG']}")
         print(f"⏰ Time window: {self.time_window_hours} hours")
+        if self.semantic_enabled:
+            print(f"🧠 Semantic analysis: ENABLED")
 
     def extract_claude_sessions(self) -> List[MonitoringSession]:
         """Extract Claude monitoring sessions."""
@@ -576,49 +612,48 @@ class PostProcessor:
         # 11. Cost USD - Claude only, not available in current data
         metrics.cost_usd = None
         
-        # 12. Response length - extract from InfluxDB
+        # 12. Response length and content - extract from InfluxDB
         if hasattr(session, 'response_length'):
             metrics.response_length = session.response_length
+            # Try to get response content if available
+            metrics.response_content = getattr(session, 'response_content', None)
         else:
-            # Extract from message content in events
-            total_length = 0
-            max_response_length = 0
+            # Extract response content - handle Claude transcripts vs OpenCode messages
+            response_content = None
             
-            for event in session.events:
-                # Check different content locations based on agent type
-                content_sources = []
+            if session.agent_type == 'claude':
+                # For Claude sessions, extract from transcript file
+                response_content = self._extract_claude_response_from_transcript(session)
+            else:
+                # For OpenCode sessions, extract from message content in events
+                response_contents = []
                 
-                # For OpenCode message content
-                message_content = event.get('message_content', {})
-                if isinstance(message_content, dict):
-                    part_info = message_content.get('properties', {}).get('part', {})
-                    # Try both 'text' and 'content' fields
-                    part_content = part_info.get('text', '') or part_info.get('content', '')
-                    if part_content:
-                        content_sources.append(part_content)
+                for event in session.events:
+                    # Check different content locations based on agent type
+                    content_sources = []
+                    
+                    # For OpenCode message content
+                    message_content = event.get('message_content', {})
+                    if isinstance(message_content, dict):
+                        part_info = message_content.get('properties', {}).get('part', {})
+                        # Try both 'text' and 'content' fields
+                        part_content = part_info.get('text', '') or part_info.get('content', '')
+                        if part_content:
+                            content_sources.append(part_content)
+                    
+                    # Find the longest content (final response)
+                    for content in content_sources:
+                        if isinstance(content, str) and len(content) > 0:
+                            # Skip prompt injection content when calculating response length
+                            if not content.startswith('<!-- EVAL_PROMPT_ID:'):
+                                response_contents.append(content)
                 
-                # For Claude-specific fields
-                if event.get('payload_data'):
-                    content_sources.append(str(event['payload_data']))
-                if event.get('chat_data'):
-                    content_sources.append(str(event['chat_data']))
-                if event.get('summary_data'):
-                    content_sources.append(str(event['summary_data']))
-                
-                # For Claude payload content
-                if event.get('payload') and isinstance(event['payload'], dict):
-                    for key, value in event['payload'].items():
-                        if isinstance(value, str) and value:
-                            content_sources.append(value)
-                
-                # Find the longest content (final response)
-                for content in content_sources:
-                    if isinstance(content, str) and len(content) > max_response_length:
-                        # Skip prompt injection content when calculating response length
-                        if not content.startswith('<!-- EVAL_PROMPT_ID:'):
-                            max_response_length = len(content)
+                # Store the longest response content (most likely the final response)
+                if response_contents:
+                    response_content = max(response_contents, key=len)
             
-            metrics.response_length = max_response_length
+            metrics.response_content = response_content
+            metrics.response_length = len(response_content) if response_content else 0
         
         # 13. Created at - session start
         metrics.created_at = session.start_time.isoformat()
@@ -656,6 +691,115 @@ class PostProcessor:
                 metrics.error_message = None
         
         return metrics
+    
+    def _extract_claude_response_from_transcript(self, session: MonitoringSession) -> Optional[str]:
+        """Extract the final assistant response from Claude transcript file."""
+        try:
+            # Find transcript path from hook payload events
+            transcript_path = None
+            
+            for event in session.events:
+                # Check different payload sources for transcript_path
+                payload_sources = [
+                    event.get('payload'),
+                    event.get('payload_data'),
+                    event.get('chat_data'),
+                    event.get('summary_data')
+                ]
+                
+                for payload in payload_sources:
+                    if isinstance(payload, dict) and 'transcript_path' in payload:
+                        transcript_path = payload['transcript_path']
+                        break
+                    elif isinstance(payload, str):
+                        # Try to parse JSON payload
+                        try:
+                            parsed_payload = json.loads(payload)
+                            if isinstance(parsed_payload, dict) and 'transcript_path' in parsed_payload:
+                                transcript_path = parsed_payload['transcript_path']
+                                break
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                
+                if transcript_path:
+                    break
+            
+            if not transcript_path:
+                return None
+            
+            # Read the transcript file
+            transcript_file = Path(transcript_path)
+            if not transcript_file.exists():
+                return None
+            
+            # Parse JSONL transcript to extract final assistant response
+            final_response = None
+            
+            with open(transcript_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                        # Look for assistant messages with text content
+                        if (entry.get('type') == 'assistant' and 
+                            entry.get('message', {}).get('role') == 'assistant'):
+                            
+                            content = entry.get('message', {}).get('content', [])
+                            if isinstance(content, list):
+                                # Extract text content from the message
+                                text_parts = []
+                                for part in content:
+                                    if isinstance(part, dict) and part.get('type') == 'text':
+                                        text_parts.append(part.get('text', ''))
+                                
+                                if text_parts:
+                                    # Join all text parts and update final response
+                                    response_text = '\n'.join(text_parts).strip()
+                                    if response_text:
+                                        final_response = response_text
+                    
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+            
+            return final_response
+            
+        except Exception as e:
+            print(f"   ⚠️ Error extracting Claude transcript: {e}")
+            return None
+    
+    def _extract_prompt_context(self, session: MonitoringSession, log_content: str) -> str:
+        """Extract prompt context from session data for semantic analysis."""
+        prompt_context = "Unknown prompt"
+        
+        # Try to extract prompt from session events
+        if hasattr(session, 'events') and session.events:
+            for event in session.events:
+                if isinstance(event, dict):
+                    # Look for prompt in various event fields
+                    for field in ['prompt', 'content', 'text', 'message']:
+                        if field in event and event[field] and len(str(event[field])) > 50:
+                            content = str(event[field])
+                            # Skip if it's just the injected comment
+                            if not content.strip().startswith('<!--'):
+                                prompt_context = content  # No length limit
+                                break
+                    if prompt_context != "Unknown prompt":
+                        break
+        
+        # Fallback: try to extract from log content
+        if prompt_context == "Unknown prompt":
+            # Look for prompt patterns in log
+            prompt_patterns = [
+                r'Prompt[:\s]+(.+?)(?:\n|$)',
+                r'User[:\s]+(.+?)(?:\n|$)',
+                r'Question[:\s]+(.+?)(?:\n|$)'
+            ]
+            for pattern in prompt_patterns:
+                match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    prompt_context = match.group(1).strip()  # No length limit
+                    break
+        
+        return prompt_context
     
     def _extract_prompt_info(self, log_content: str) -> Optional[str]:
         """Extract prompt information from log - leave blank if not directly available as ID."""
@@ -1097,33 +1241,113 @@ class PostProcessor:
                     if event.get('tool_name'):
                         f.write(f"Tool: {event['tool_name']}\n")
                     
-                    # Dump ALL data from InfluxDB
-                    f.write(f"=== COMPLETE INFLUXDB DATA ===\n")
+                    # Extract and display meaningful conversation data
+                    f.write(f"=== CONVERSATION DATA ===\n")
                     
-                    # Show payload data
-                    payload = event.get('payload', {})
-                    if payload:
-                        f.write(f"--- PAYLOAD DATA ---\n")
-                        for key, value in payload.items():
-                            f.write(f"{key}: {value}\n")
+                    # Extract message content for both agent types
+                    if session.agent_type == 'claude':
+                        # For Claude, show payload data and extract transcript info
+                        payload = event.get('payload', {})
+                        if payload:
+                            f.write(f"--- CLAUDE EVENT DATA ---\n")
+                            for key, value in payload.items():
+                                if key == 'transcript_path':
+                                    f.write(f"Transcript File: {value}\n")
+                                elif key == 'tool_name':
+                                    f.write(f"Tool: {value}\n")
+                                elif key == 'tool_input':
+                                    f.write(f"Tool Input: {json.dumps(value, indent=2)}\n")
+                                elif key == 'tool_response':
+                                    f.write(f"Tool Response: {json.dumps(value, indent=2)}\n")
+                                else:
+                                    f.write(f"{key}: {value}\n")
+                        
+                        # Try to extract actual conversation from transcript
+                        if payload.get('transcript_path'):
+                            transcript_content = self._extract_claude_response_from_transcript(session)
+                            if transcript_content:
+                                f.write(f"--- CLAUDE CONVERSATION ---\n")
+                            f.write(f"Assistant Response: {transcript_content}\n")
                     
-                    # Show chat_data if available
-                    if 'chat_data_data' in event:
-                        f.write(f"--- CHAT DATA ---\n")
-                        f.write(f"chat_data: {event['chat_data_data']}\n")
+                    elif session.agent_type == 'opencode':
+                        # For OpenCode, extract meaningful message content
+                        message_content = event.get('message_content', {})
+                        if message_content and isinstance(message_content, dict):
+                            properties = message_content.get('properties', {})
+                            part = properties.get('part', {})
+                            
+                            f.write(f"--- OPENCODE MESSAGE DATA ---\n")
+                            
+                            # Extract user prompts
+                            if part.get('type') == 'text' and part.get('text'):
+                                text_content = part['text']
+                                # Check if this is a user prompt
+                                if any(marker in text_content for marker in ['EVAL_PROMPT_ID', 'EVAL_MODEL']):
+                                    f.write(f"User Prompt: {text_content}\n")
+                                else:
+                                    f.write(f"Message Text: {text_content}\n")
+                            
+                            # Extract tool information
+                            elif part.get('type') == 'tool':
+                                tool_name = part.get('tool', 'unknown')
+                                call_id = part.get('callID', 'no_id')
+                                state = part.get('state', {})
+                                
+                                f.write(f"Tool Execution: {tool_name}\n")
+                                f.write(f"Call ID: {call_id}\n")
+                                f.write(f"Status: {state.get('status', 'unknown')}\n")
+                                
+                                # Show tool input
+                                if 'input' in state:
+                                    f.write(f"Tool Input: {json.dumps(state['input'], indent=2)}\n")
+                                
+                                # Show tool output (if completed)
+                                if 'output' in state:
+                                    output = state['output']
+                                    if isinstance(output, str):
+                                        try:
+                                            # Try to parse and format JSON output
+                                            parsed_output = json.loads(output)
+                                            if isinstance(parsed_output, dict) and 'content' in parsed_output:
+                                                content = parsed_output['content']
+                                                if isinstance(content, list) and content:
+                                                    tool_text = content[0].get('text', '')
+                                                    # Decode unicode escapes and format
+                                                    try:
+                                                        decoded_text = tool_text.encode().decode('unicode_escape')
+                                                        # Parse the JSON inside
+                                                        tool_data = json.loads(decoded_text)
+                                                        f.write(f"Tool Result: {json.dumps(tool_data, indent=2)}\n")
+                                                    except:
+                                                        f.write(f"Tool Result (raw): {tool_text}\n")
+                                                else:
+                                                    f.write(f"Tool Output: {json.dumps(parsed_output, indent=2)}\n")
+                                            else:
+                                                f.write(f"Tool Output: {json.dumps(parsed_output, indent=2)}\n")
+                                        except:
+                                            f.write(f"Tool Output (raw): {output}\n")
+                                    else:
+                                        f.write(f"Tool Output: {json.dumps(output, indent=2)}\n")
+                                
+                                # Show timing
+                                if 'time' in state:
+                                    time_info = state['time']
+                                    start = time_info.get('start')
+                                    end = time_info.get('end')
+                                    if start and end:
+                                        duration = (end - start) / 1000.0  # Convert ms to seconds
+                                        f.write(f"Execution Time: {duration:.3f}s\n")
+                            
+                            # Extract other message types
+                            elif part.get('type') in ['step-start', 'step-finish']:
+                                f.write(f"Step: {part['type']}\n")
+                                if 'tokens' in part:
+                                    tokens = part['tokens']
+                                    f.write(f"Tokens: Input={tokens.get('input', 0)}, Output={tokens.get('output', 0)}\n")
+                                if 'cost' in part:
+                                    f.write(f"Cost: ${part['cost']}\n")
                     
-                    # Show summary if available  
-                    if 'summary_data' in event:
-                        f.write(f"--- SUMMARY DATA ---\n")
-                        f.write(f"summary: {event['summary_data']}\n")
-                    
-                    # Show any other data fields
-                    for key, value in event.items():
-                        if key not in ['timestamp', 'type', 'tool_name', 'payload', 'chat_data_data', 'summary_data']:
-                            f.write(f"--- {key.upper()} ---\n")
-                            f.write(f"{key}: {value}\n")
-                    
-                    f.write(f"=== END INFLUXDB DATA ===\n")
+                    f.write(f"=== END CONVERSATION DATA ===\n")
                     
                     # Add specific details based on agent type (legacy format for compatibility)
                     if session.agent_type == 'claude':
@@ -1140,7 +1364,7 @@ class PostProcessor:
                     
                     elif session.agent_type == 'opencode':
                         if event['type'] == 'tool_execution':
-                            f.write(f"Tool Data: {event.get('value', '')[:100]}...\n")
+                            f.write(f"Tool Data: {event.get('value', '')}\n")
                     
                     f.write("-" * 40 + "\n")
             
@@ -1175,12 +1399,113 @@ class PostProcessor:
             for i, event in enumerate(session.events, 1):
                 f.write(f"[Event {i}] {event['timestamp']}\n")
                 f.write(f"Type: {event.get('type', 'unknown')}\n")
-                f.write("=== COMPLETE INFLUXDB DATA ===\n")
-                f.write("--- TOOL_DATA ---\n")
-                f.write(f"tool_data: {event.get('tool_data', {})}\n")
-                f.write("--- MESSAGE_CONTENT ---\n")
-                f.write(f"message_content: {event.get('message_content', {})}\n")
-                f.write("=== END INFLUXDB DATA ===\n")
+                
+                # Extract and display meaningful conversation data
+                f.write("=== CONVERSATION DATA ===\n")
+                
+                if session.agent_type == 'claude':
+                    # For Claude, show payload data and extract transcript info
+                    payload = event.get('payload', {})
+                    if payload:
+                        f.write("--- CLAUDE EVENT DATA ---\n")
+                        for key, value in payload.items():
+                            if key == 'transcript_path':
+                                f.write(f"Transcript File: {value}\n")
+                            elif key == 'tool_name':
+                                f.write(f"Tool: {value}\n")
+                            elif key == 'tool_input':
+                                f.write(f"Tool Input: {json.dumps(value, indent=2)}\n")
+                            elif key == 'tool_response':
+                                f.write(f"Tool Response: {json.dumps(value, indent=2)}\n")
+                            else:
+                                f.write(f"{key}: {value}\n")
+                    
+                    # Try to extract actual conversation from transcript
+                    if payload.get('transcript_path'):
+                        transcript_content = self._extract_claude_response_from_transcript(session)
+                        if transcript_content:
+                            f.write("--- CLAUDE CONVERSATION ---\n")
+                            f.write(f"Assistant Response: {transcript_content}\n")
+                
+                elif session.agent_type == 'opencode':
+                    # For OpenCode, extract meaningful message content
+                    message_content = event.get('message_content', {})
+                    if message_content and isinstance(message_content, dict):
+                        properties = message_content.get('properties', {})
+                        part = properties.get('part', {})
+                        
+                        f.write("--- OPENCODE MESSAGE DATA ---\n")
+                        
+                        # Extract user prompts
+                        if part.get('type') == 'text' and part.get('text'):
+                            text_content = part['text']
+                            # Check if this is a user prompt
+                            if any(marker in text_content for marker in ['EVAL_PROMPT_ID', 'EVAL_MODEL']):
+                                f.write(f"User Prompt: {text_content}\n")
+                            else:
+                                f.write(f"Message Text: {text_content}\n")
+                        
+                        # Extract tool information
+                        elif part.get('type') == 'tool':
+                            tool_name = part.get('tool', 'unknown')
+                            call_id = part.get('callID', 'no_id')
+                            state = part.get('state', {})
+                            
+                            f.write(f"Tool Execution: {tool_name}\n")
+                            f.write(f"Call ID: {call_id}\n")
+                            f.write(f"Status: {state.get('status', 'unknown')}\n")
+                            
+                            # Show tool input
+                            if 'input' in state:
+                                f.write(f"Tool Input: {json.dumps(state['input'], indent=2)}\n")
+                            
+                            # Show tool output (if completed)
+                            if 'output' in state:
+                                output = state['output']
+                                if isinstance(output, str):
+                                    try:
+                                        # Try to parse and format JSON output
+                                        parsed_output = json.loads(output)
+                                        if isinstance(parsed_output, dict) and 'content' in parsed_output:
+                                            content = parsed_output['content']
+                                            if isinstance(content, list) and content:
+                                                tool_text = content[0].get('text', '')
+                                                # Decode unicode escapes and format
+                                                try:
+                                                    decoded_text = tool_text.encode().decode('unicode_escape')
+                                                    # Parse the JSON inside
+                                                    tool_data = json.loads(decoded_text)
+                                                    f.write(f"Tool Result: {json.dumps(tool_data, indent=2)}\n")
+                                                except:
+                                                    f.write(f"Tool Result (raw): {tool_text}\n")
+                                            else:
+                                                f.write(f"Tool Output: {json.dumps(parsed_output, indent=2)}\n")
+                                        else:
+                                            f.write(f"Tool Output: {json.dumps(parsed_output, indent=2)}\n")
+                                    except:
+                                        f.write(f"Tool Output (raw): {output[:500]}{'...' if len(output) > 500 else ''}\n")
+                                else:
+                                    f.write(f"Tool Output: {json.dumps(output, indent=2)}\n")
+                            
+                            # Show timing
+                            if 'time' in state:
+                                time_info = state['time']
+                                start = time_info.get('start')
+                                end = time_info.get('end')
+                                if start and end:
+                                    duration = (end - start) / 1000.0  # Convert ms to seconds
+                                    f.write(f"Execution Time: {duration:.3f}s\n")
+                        
+                        # Extract other message types
+                        elif part.get('type') in ['step-start', 'step-finish']:
+                            f.write(f"Step: {part['type']}\n")
+                            if 'tokens' in part:
+                                tokens = part['tokens']
+                                f.write(f"Tokens: Input={tokens.get('input', 0)}, Output={tokens.get('output', 0)}\n")
+                            if 'cost' in part:
+                                f.write(f"Cost: ${part['cost']}\n")
+                
+                f.write("=== END CONVERSATION DATA ===\n")
                 f.write("-" * 40 + "\n\n")
         
         print(f"   📝 Created log: {log_file}")
@@ -1191,12 +1516,45 @@ class PostProcessor:
         
         metrics = self.calculate_session_metrics(session, log_content, session_number)
         
+        # Perform semantic analysis if enabled
+        semantic_analysis = None
+        if self.semantic_enabled and self.semantic_engine:
+            try:
+                print(f"   🧠 Running semantic analysis...")
+                prompt_context = self._extract_prompt_context(session, log_content)
+                semantic_analysis = self.semantic_engine.analyze_session_semantics(
+                    metrics, session, prompt_context
+                )
+                
+                # Print semantic insights
+                if semantic_analysis.false_negative_detected:
+                    print(f"   🔍 False negative detected: Technical={metrics.success}, Semantic={semantic_analysis.semantic_success}")
+                print(f"   🧠 Quality score: {semantic_analysis.quality_score:.2f}, Confidence: {semantic_analysis.confidence_score:.2f}")
+                
+                # Save semantic analysis
+                semantic_file = session_dir / "semantic_analysis.json"
+                semantic_data = {
+                    'generated_at': datetime.now().isoformat(),
+                    'semantic_analysis': asdict(semantic_analysis)
+                }
+                with open(semantic_file, 'w') as f:
+                    json.dump(semantic_data, f, indent=2)
+                print(f"   🧠 Created semantic analysis: {semantic_file}")
+                
+            except Exception as e:
+                print(f"   ⚠️  Semantic analysis failed: {e}")
+                semantic_analysis = None
+        
         # Save individual evaluation metrics file for this session
         metrics_file = session_dir / "evaluation_metrics.json"
         metrics_data = {
             'generated_at': datetime.now().isoformat(),
             'session_metrics': asdict(metrics)
         }
+        
+        # Include semantic analysis in metrics if available
+        if semantic_analysis:
+            metrics_data['semantic_analysis'] = asdict(semantic_analysis)
         
         with open(metrics_file, 'w') as f:
             json.dump(metrics_data, f, indent=2)
@@ -1208,6 +1566,8 @@ class PostProcessor:
         print(f"      📍 Agent: {metrics.agent_type} | Model: {metrics.model}")
         print(f"      🕒 Duration: {metrics.execution_time:.2f}s | Tool calls: {metrics.number_of_tool_calls}")
         print(f"      📈 Success: {metrics.success}")
+        if semantic_analysis:
+            print(f"      🧠 Semantic Success: {semantic_analysis.semantic_success} | Quality: {semantic_analysis.quality_score:.2f}")
         
         return {
             'session_id': session.session_id,
@@ -1215,7 +1575,8 @@ class PostProcessor:
             'session_dir': session_dir,
             'log_file': log_file,
             'metrics_file': metrics_file,
-            'metrics': metrics
+            'metrics': metrics,
+            'semantic_analysis': semantic_analysis
         }
 
     def process_all(self) -> Dict[str, Any]:
@@ -1337,12 +1698,21 @@ class PostProcessor:
                 print(f"   ❌ Error processing session {session.session_id}: {e}")
                 continue
         
-        # Define CSV columns (matching evaluation_metrics.json structure)
+        # Define CSV columns (matching evaluation_metrics.json structure + semantic analysis)
         csv_columns = [
             'number', 'prompt', 'session_id', 'agent_type', 'model', 'success',
             'execution_time', 'number_of_calls', 'number_of_tool_calls', 'tools_used',
-            'cost_usd', 'response_length', 'created_at', 'completed_at', 'logfile', 'error_message'
+            'cost_usd', 'response_length', 'response_content', 'created_at', 'completed_at', 'logfile', 'error_message'
         ]
+        
+        # Add semantic analysis columns if enabled
+        if self.semantic_enabled:
+            semantic_columns = [
+                'semantic_success', 'semantic_confidence', 'quality_score',
+                'task_comprehension_score', 'tool_effectiveness_score', 'response_completeness_score',
+                'false_negative_flag', 'improvement_suggestions', 'semantic_analysis_cost'
+            ]
+            csv_columns.extend(semantic_columns)
         
         # Write CSV file
         try:
@@ -1350,7 +1720,7 @@ class PostProcessor:
                 writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
                 writer.writeheader()
                 
-                for metrics in metrics_list:
+                for i, metrics in enumerate(metrics_list):
                     # Convert metrics to dict and prepare for CSV
                     row = asdict(metrics)
                     
@@ -1359,6 +1729,55 @@ class PostProcessor:
                         row['tools_used'] = '; '.join(row['tools_used'])
                     else:
                         row['tools_used'] = ''
+                    
+                    # Handle response_content (keep full content for CSV)
+                    if row.get('response_content'):
+                        # Keep full content - no truncation
+                        pass
+                    else:
+                        row['response_content'] = ''
+                    
+                    # Add semantic analysis data if available and enabled
+                    if self.semantic_enabled:
+                        # Try to get semantic analysis for this session
+                        session = sessions[i]
+                        semantic_analysis = None
+                        
+                        if hasattr(session, 'semantic_analysis'):
+                            semantic_analysis = session.semantic_analysis
+                        else:
+                            # Try to load from file
+                            semantic_file = self.output_dir / f"{session.agent_type}" / session.session_id / "semantic_analysis.json"
+                            if semantic_file.exists():
+                                try:
+                                    with open(semantic_file, 'r') as f:
+                                        semantic_data = json.load(f)
+                                    semantic_analysis = semantic_data.get('semantic_analysis')
+                                except:
+                                    pass
+                        
+                        # Add semantic columns
+                        if semantic_analysis:
+                            row['semantic_success'] = semantic_analysis.get('semantic_success', False)
+                            row['semantic_confidence'] = semantic_analysis.get('confidence_score', 0.0)
+                            row['quality_score'] = semantic_analysis.get('quality_score', 0.0)
+                            row['task_comprehension_score'] = semantic_analysis.get('task_comprehension', {}).get('interpretation_accuracy', 0.0)
+                            row['tool_effectiveness_score'] = semantic_analysis.get('tool_effectiveness', {}).get('usage_efficiency', 0.0)
+                            row['response_completeness_score'] = semantic_analysis.get('response_completeness', {}).get('completeness', 0.0)
+                            row['false_negative_flag'] = semantic_analysis.get('false_negative_detected', False)
+                            row['improvement_suggestions'] = '; '.join(semantic_analysis.get('improvement_suggestions', []))
+                            row['semantic_analysis_cost'] = semantic_analysis.get('analysis_cost_usd', 0.0)
+                        else:
+                            # Fill with default values
+                            row['semantic_success'] = ''
+                            row['semantic_confidence'] = ''
+                            row['quality_score'] = ''
+                            row['task_comprehension_score'] = ''
+                            row['tool_effectiveness_score'] = ''
+                            row['response_completeness_score'] = ''
+                            row['false_negative_flag'] = ''
+                            row['improvement_suggestions'] = ''
+                            row['semantic_analysis_cost'] = ''
                     
                     # Handle None values
                     for key, value in row.items():

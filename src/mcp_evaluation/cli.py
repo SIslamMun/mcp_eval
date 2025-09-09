@@ -876,10 +876,17 @@ def stats(config: Optional[str]):
             prompt_table.add_column("Claude", style="blue")
             prompt_table.add_column("OpenCode", style="yellow")
             
-            for prompt_id, counts in sorted(prompt_distribution.items()):
+            # Sort with None-safe key function
+            def safe_sort_key(item):
+                prompt_id, counts = item
+                # Convert None to "Unknown" for sorting
+                return str(prompt_id) if prompt_id is not None else "Unknown"
+            
+            for prompt_id, counts in sorted(prompt_distribution.items(), key=safe_sort_key):
                 percentage = (counts['total'] / total_evaluated_sessions * 100) if total_evaluated_sessions > 0 else 0
+                display_prompt_id = str(prompt_id) if prompt_id is not None else "Unknown"
                 prompt_table.add_row(
-                    str(prompt_id),
+                    display_prompt_id,
                     str(counts['total']),
                     f"{percentage:.1f}%",
                     str(counts['claude']),
@@ -1001,13 +1008,19 @@ def stats(config: Optional[str]):
 @click.option("--csv", is_flag=True, help="Export results to CSV file")
 @click.option("--csv-path", type=str, help="Custom path for CSV file (directory or full file path)")
 @click.option("--csv-only", is_flag=True, help="Only export CSV without generating individual session reports")
+@click.option("--semantic", is_flag=True, help="Enable semantic analysis using Claude")
+@click.option("--semantic-model", type=click.Choice(['haiku', 'sonnet', 'opus']), default='sonnet', help="Claude model for semantic analysis (default: sonnet)")
+@click.option("--semantic-cost-limit", type=float, default=5.0, help="Maximum cost in USD for semantic analysis (default: 5.0)")
 def post_processing(
     output: str,
     verbose: bool,
     agent: Optional[str],
     csv: bool,
     csv_path: Optional[str],
-    csv_only: bool
+    csv_only: bool,
+    semantic: bool,
+    semantic_model: str,
+    semantic_cost_limit: float
 ):
     """Process InfluxDB monitoring data and generate evaluation metrics.
     
@@ -1028,8 +1041,8 @@ def post_processing(
     try:
         from .post_processor import PostProcessor
         
-        # Initialize post processor
-        processor = PostProcessor(output_dir=output)
+        # Initialize post processor with semantic analysis if requested
+        processor = PostProcessor(output_dir=output, enable_semantic_analysis=semantic)
         
         if verbose:
             console.print(f"[cyan]Output Directory:[/cyan] {output}")
@@ -1040,6 +1053,10 @@ def post_processing(
             if csv or csv_only:
                 csv_output = csv_path if csv_path else output
                 console.print(f"[cyan]CSV Export:[/cyan] {csv_output}")
+            if semantic:
+                console.print(f"[cyan]Semantic Analysis:[/cyan] ENABLED")
+                console.print(f"[cyan]Analysis Model:[/cyan] {semantic_model}")
+                console.print(f"[cyan]Cost Limit:[/cyan] ${semantic_cost_limit}")
             console.print()
         
         results = None
@@ -1253,6 +1270,238 @@ def _get_model_name(result, multi_result):
     
     return "unknown"
 
+
+
+@main.group()
+def semantic_analysis():
+    """Semantic analysis commands for MCP evaluation results."""
+    pass
+
+
+@semantic_analysis.command("session")
+@click.argument("session_id", type=str)
+@click.option("--model", type=click.Choice(['haiku', 'sonnet', 'opus']), default='sonnet', help="Claude model for analysis (default: sonnet)")
+@click.option("--output-dir", default="reports/", help="Reports directory (default: reports/)")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed analysis results")
+def analyze_session(session_id: str, model: str, output_dir: str, verbose: bool):
+    """Run semantic analysis on a specific evaluation session."""
+    console.print(f"[bold blue]🧠 Semantic Analysis for Session: {session_id}[/bold blue]\n")
+    
+    try:
+        from .semantic_analyzer import SemanticAnalysisEngine
+        from .post_processor import PostProcessor, load_influxdb_config
+        
+        # Load configuration
+        config = load_influxdb_config()
+        config.update({
+            "SEMANTIC_ANALYSIS_MODEL": model,
+            "SEMANTIC_ANALYSIS_ENABLED": True
+        })
+        
+        # Initialize post processor to get session data
+        processor = PostProcessor(output_dir=output_dir)
+        
+        # Find the session
+        claude_sessions = processor.extract_claude_sessions()
+        opencode_sessions = processor._extract_opencode_sessions()
+        all_sessions = claude_sessions + opencode_sessions
+        
+        target_session = None
+        for session in all_sessions:
+            if session.session_id == session_id:
+                target_session = session
+                break
+        
+        if not target_session:
+            console.print(f"[red]❌ Session not found: {session_id}[/red]")
+            console.print("Available sessions:")
+            for session in all_sessions[:10]:  # Show first 10
+                console.print(f"  - {session.session_id} ({session.agent_type})")
+            if len(all_sessions) > 10:
+                console.print(f"  ... and {len(all_sessions) - 10} more")
+            return
+        
+        # Calculate basic metrics
+        metrics = processor.calculate_session_metrics(target_session, "", 1)
+        
+        # Run semantic analysis
+        semantic_engine = SemanticAnalysisEngine(claude_model=model, config=config)
+        prompt_context = processor._extract_prompt_context(target_session, "")
+        
+        console.print(f"[cyan]Analyzing session with Claude {model}...[/cyan]")
+        semantic_analysis = semantic_engine.analyze_session_semantics(metrics, target_session, prompt_context)
+        
+        # Display results
+        console.print(f"\n[bold green]✅ Semantic Analysis Complete[/bold green]")
+        console.print(f"[cyan]Session ID:[/cyan] {semantic_analysis.session_id}")
+        console.print(f"[cyan]Agent Type:[/cyan] {semantic_analysis.agent_type}")
+        console.print(f"[cyan]Technical Success:[/cyan] {metrics.success}")
+        console.print(f"[cyan]Semantic Success:[/cyan] {semantic_analysis.semantic_success}")
+        console.print(f"[cyan]Quality Score:[/cyan] {semantic_analysis.quality_score:.2f}")
+        console.print(f"[cyan]Confidence:[/cyan] {semantic_analysis.confidence_score:.2f}")
+        console.print(f"[cyan]Analysis Cost:[/cyan] ${semantic_analysis.analysis_cost_usd:.4f}")
+        
+        if semantic_analysis.false_negative_detected:
+            console.print(f"[yellow]⚠️  False negative detected![/yellow]")
+        
+        if semantic_analysis.improvement_suggestions:
+            console.print(f"\n[bold]💡 Improvement Suggestions:[/bold]")
+            for i, suggestion in enumerate(semantic_analysis.improvement_suggestions, 1):
+                console.print(f"  {i}. {suggestion}")
+        
+        if verbose:
+            console.print(f"\n[bold]📊 Detailed Analysis:[/bold]")
+            console.print(f"[cyan]Task Understanding:[/cyan] {semantic_analysis.task_comprehension.interpretation_accuracy:.2f}")
+            console.print(f"[cyan]Approach Quality:[/cyan] {semantic_analysis.approach_quality.logical_coherence:.2f}")
+            console.print(f"[cyan]Tool Effectiveness:[/cyan] {semantic_analysis.tool_effectiveness.usage_efficiency:.2f}")
+            console.print(f"[cyan]Response Completeness:[/cyan] {semantic_analysis.response_completeness.completeness:.2f}")
+            
+            if semantic_analysis.failure_root_cause:
+                console.print(f"[red]Failure Cause:[/red] {semantic_analysis.failure_root_cause}")
+        
+        # Save results
+        output_path = Path(output_dir)
+        results_file = output_path / f"semantic_analysis_{session_id}.json"
+        
+        with open(results_file, 'w') as f:
+            import json
+            from dataclasses import asdict
+            json.dump({
+                'session_id': session_id,
+                'analysis_timestamp': datetime.now().isoformat(),
+                'semantic_analysis': asdict(semantic_analysis)
+            }, f, indent=2)
+        
+        console.print(f"\n[green]✅ Analysis saved to: {results_file}[/green]")
+        
+        processor.close()
+        
+    except Exception as e:
+        console.print(f"[red]❌ Semantic analysis failed: {e}[/red]")
+        logger.exception("Semantic analysis failed")
+        sys.exit(1)
+
+
+@semantic_analysis.command("batch")
+@click.option("--agent", type=click.Choice(['claude', 'opencode']), help="Filter by agent type")
+@click.option("--limit", type=int, default=10, help="Maximum number of sessions to analyze (default: 10)")
+@click.option("--model", type=click.Choice(['haiku', 'sonnet', 'opus']), default='sonnet', help="Claude model for analysis (default: sonnet)")
+@click.option("--output-dir", default="reports/", help="Reports directory (default: reports/)")
+@click.option("--cost-limit", type=float, default=5.0, help="Maximum total cost in USD (default: 5.0)")
+def analyze_batch(agent: Optional[str], limit: int, model: str, output_dir: str, cost_limit: float):
+    """Run semantic analysis on multiple evaluation sessions."""
+    console.print(f"[bold blue]🧠 Batch Semantic Analysis[/bold blue]")
+    console.print(f"[cyan]Agent Filter:[/cyan] {agent or 'All'}")
+    console.print(f"[cyan]Session Limit:[/cyan] {limit}")
+    console.print(f"[cyan]Analysis Model:[/cyan] {model}")
+    console.print(f"[cyan]Cost Limit:[/cyan] ${cost_limit}")
+    console.print()
+    
+    try:
+        from .semantic_analyzer import SemanticAnalysisEngine
+        from .post_processor import PostProcessor, load_influxdb_config
+        
+        # Load configuration
+        config = load_influxdb_config()
+        config.update({
+            "SEMANTIC_ANALYSIS_MODEL": model,
+            "SEMANTIC_ANALYSIS_ENABLED": True
+        })
+        
+        # Initialize components
+        processor = PostProcessor(output_dir=output_dir)
+        semantic_engine = SemanticAnalysisEngine(claude_model=model, config=config)
+        
+        # Get sessions
+        if agent == 'claude':
+            sessions = processor.extract_claude_sessions()
+        elif agent == 'opencode':
+            sessions = processor._extract_opencode_sessions()
+        else:
+            claude_sessions = processor.extract_claude_sessions()
+            opencode_sessions = processor._extract_opencode_sessions()
+            sessions = claude_sessions + opencode_sessions
+        
+        # Limit sessions
+        sessions = sessions[:limit]
+        console.print(f"[cyan]Analyzing {len(sessions)} sessions...[/cyan]\n")
+        
+        # Process sessions
+        analyses = []
+        total_cost = 0.0
+        
+        for i, session in enumerate(sessions, 1):
+            if total_cost >= cost_limit:
+                console.print(f"[yellow]⚠️  Cost limit reached (${cost_limit}). Stopping analysis.[/yellow]")
+                break
+                
+            try:
+                console.print(f"[cyan]Analyzing session {i}/{len(sessions)}: {session.session_id}[/cyan]")
+                
+                # Calculate metrics and run analysis
+                metrics = processor.calculate_session_metrics(session, "", i)
+                prompt_context = processor._extract_prompt_context(session, "")
+                semantic_analysis = semantic_engine.analyze_session_semantics(metrics, session, prompt_context)
+                
+                analyses.append(semantic_analysis)
+                total_cost += semantic_analysis.analysis_cost_usd
+                
+                # Show brief results
+                status = "✅" if semantic_analysis.semantic_success else "❌"
+                quality = semantic_analysis.quality_score
+                console.print(f"  {status} Quality: {quality:.2f}, Cost: ${semantic_analysis.analysis_cost_usd:.4f}")
+                
+                if semantic_analysis.false_negative_detected:
+                    console.print(f"  🔍 False negative detected!")
+                
+            except Exception as e:
+                console.print(f"  [red]❌ Failed: {e}[/red]")
+                continue
+        
+        # Generate batch insights
+        if analyses:
+            console.print(f"\n[bold blue]📊 Generating batch insights...[/bold blue]")
+            metrics_list = []
+            for session in sessions[:len(analyses)]:
+                metrics = processor.calculate_session_metrics(session, "", 1)
+                metrics_list.append(metrics)
+            
+            batch_insights = semantic_engine.analyze_batch_patterns(metrics_list)
+            
+            # Display summary
+            console.print(f"\n[bold green]✅ Batch Analysis Complete[/bold green]")
+            console.print(f"[cyan]Sessions Analyzed:[/cyan] {len(analyses)}")
+            console.print(f"[cyan]Total Cost:[/cyan] ${total_cost:.4f}")
+            console.print(f"[cyan]Semantic Success Rate:[/cyan] {batch_insights.semantic_success_rate:.1%}")
+            console.print(f"[cyan]False Negative Rate:[/cyan] {batch_insights.false_negative_rate:.1%}")
+            console.print(f"[cyan]Average Quality Score:[/cyan] {batch_insights.average_quality_score:.2f}")
+            
+            if batch_insights.improvement_opportunities:
+                console.print(f"\n[bold]💡 Key Improvement Opportunities:[/bold]")
+                for i, opportunity in enumerate(batch_insights.improvement_opportunities[:5], 1):
+                    console.print(f"  {i}. {opportunity}")
+            
+            # Save results
+            output_path = Path(output_dir)
+            results_file = output_path / f"batch_semantic_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            
+            with open(results_file, 'w') as f:
+                import json
+                from dataclasses import asdict
+                json.dump({
+                    'analysis_timestamp': datetime.now().isoformat(),
+                    'batch_insights': asdict(batch_insights),
+                    'individual_analyses': [asdict(analysis) for analysis in analyses]
+                }, f, indent=2)
+            
+            console.print(f"\n[green]✅ Results saved to: {results_file}[/green]")
+        
+        processor.close()
+        
+    except Exception as e:
+        console.print(f"[red]❌ Batch analysis failed: {e}[/red]")
+        logger.exception("Batch analysis failed")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
