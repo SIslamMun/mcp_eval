@@ -1,0 +1,1600 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Session Tree: ses_6cfad4f35ffe9ArEpB0Xmsa99X</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+            padding: 20px;
+            animation: backgroundShift 10s ease-in-out infinite alternate;
+        }
+        
+        @keyframes backgroundShift {
+            0% { background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%); }
+            100% { background: linear-gradient(135deg, #f093fb 0%, #667eea 50%, #764ba2 100%); }
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.2);
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 35px 70px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.3);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1.5" fill="rgba(255,255,255,0.05)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.3;
+        }
+        
+        .header h1 {
+            font-size: 2.8em;
+            margin-bottom: 15px;
+            font-weight: 300;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .header .subtitle {
+            font-size: 1.3em;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+            font-weight: 300;
+        }
+        
+        .session-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .meta-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.03);
+            text-align: center;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .meta-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+        }
+        
+        .meta-card .label {
+            font-size: 0.85em;
+            color: #8b5cf6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .meta-card .value {
+            font-size: 1.3em;
+            font-weight: 700;
+            color: #1e293b;
+            word-break: break-all;
+            overflow-wrap: break-word;
+            max-width: 100%;
+            white-space: normal;
+            line-height: 1.4;
+        }
+        
+        .user-prompt {
+            padding: 30px;
+            background: #fff3cd;
+            border-left: 5px solid #ffc107;
+            margin: 20px;
+            border-radius: 8px;
+        }
+        
+        .user-prompt h3 {
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .user-prompt pre {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #ffeaa7;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .conversation-tree {
+            padding: 30px;
+            position: relative;
+        }
+        
+        .tree-container {
+            position: relative;
+            margin-left: 40px;
+        }
+        
+        .tree-container::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: linear-gradient(to bottom, #667eea, #764ba2);
+            border-radius: 1px;
+        }
+        
+        .tree-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .tree-header h3 {
+            color: #2c3e50;
+            font-size: 1.5em;
+        }
+        
+        .expand-all {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .expand-all:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+        
+        .event-node {
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            margin-left: 40px;
+        }
+        
+        .event-node::before {
+            content: '';
+            position: absolute;
+            left: -40px;
+            top: 50%;
+            width: 20px;
+            height: 2px;
+            background: linear-gradient(to right, #667eea, #764ba2);
+            border-radius: 1px;
+        }
+        
+        .event-node::after {
+            content: '';
+            position: absolute;
+            left: -22px;
+            top: 50%;
+            width: 12px;
+            height: 12px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 50%;
+            transform: translateY(-50%);
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.8);
+            z-index: 2;
+        }
+        
+        .event-node.tool::after {
+            background: linear-gradient(135deg, #10b981, #059669);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+        }
+        
+        .event-node.response::after {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        
+        .event-node.user::after {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+        }
+        
+        .event-node:first-child::after {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+        }
+        
+        .event-node:last-child::after {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+        }
+        
+        .event-node:hover {
+            transform: translateY(-2px) translateX(5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.12);
+        }
+        
+        .event-node:hover::after {
+            transform: translateY(-50%) scale(1.2);
+            box-shadow: 0 0 0 5px rgba(255,255,255,0.9);
+        }
+        
+        .event-header {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            padding: 20px 25px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        
+        .event-header:hover {
+            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            transform: translateX(5px);
+        }
+        
+        .event-header.tool {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            border-left: 5px solid #10b981;
+            position: relative;
+        }
+        
+        .event-header.tool::before {
+            content: '🔧';
+            position: absolute;
+            left: -2px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.2em;
+        }
+        
+        .event-header.response {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-left: 5px solid #2196f3;
+        }
+        
+        .event-title {
+            font-weight: 600;
+            color: #2c3e50;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            max-width: 100%;
+        }
+        
+        .event-subtitle {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 3px;
+        }
+        
+        .event-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        
+        .event-badge.tool {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+        
+        .event-badge.response {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+        
+        .event-content {
+            padding: 20px;
+            background: white;
+            display: none;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .event-content.expanded {
+            display: block;
+        }
+        
+        .event-content pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            border: 1px solid #dee2e6;
+        }
+        
+        .response-content {
+            background: #f0f8ff;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2196f3;
+            margin-top: 15px;
+        }
+        
+        .response-content h4 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+        
+        .tool-content {
+            background: #f1f8e9;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #4caf50;
+            margin-top: 15px;
+        }
+        
+        .tool-content h4 {
+            color: #388e3c;
+            margin-bottom: 10px;
+        }
+        
+        .expand-icon {
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            font-size: 1.3em;
+            color: #667eea;
+            padding: 5px;
+            border-radius: 50%;
+            background: rgba(102, 126, 234, 0.1);
+        }
+        
+        .expand-icon:hover {
+            background: rgba(102, 126, 234, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .expand-icon.expanded {
+            transform: rotate(90deg) scale(1.1);
+            color: #764ba2;
+        }
+        
+        .footer {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .session-meta {
+                grid-template-columns: 1fr;
+            }
+            
+            .tree-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌳 MCP Evaluation Session</h1>
+            <div class="subtitle">Interactive Conversation Tree Viewer</div>
+        </div>
+        
+        <div class="session-meta">
+            <div class="meta-card">
+                <div class="label">Session ID</div>
+                <div class="value">ses_6cfad4f35ffe9ArEpB0Xmsa99X</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Agent Type</div>
+                <div class="value">opencode</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Duration</div>
+                <div class="value">9.79 seconds</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Events</div>
+                <div class="value">41</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Tools Used</div>
+                <div class="value">node_hardware_get_cpu_info</div>
+            </div>
+        </div>
+        
+        
+        
+        <div class="conversation-tree">
+            <div class="tree-header">
+                <h3>🌳 Conversation Flow Tree</h3>
+                <button class="expand-all" onclick="toggleAllEvents()">Expand All</button>
+            </div>
+            
+            <div class="tree-container">
+                
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(1)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:29</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 1</span>
+                        <span class="expand-icon" id="expand-icon-1">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-1">
+                    <pre>1] 2025-09-09 21:12:29.674000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+User Prompt: <!-- EVAL_MODEL:github-copilot/claude-3.5-sonnet -->
+<!-- EVAL_PROMPT_ID:1 -->
+# Simple Node Hardware MCP Test
+
+Please show my CPU information.
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(2)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 2</span>
+                        <span class="expand-icon" id="expand-icon-2">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-2">
+                    <pre>2] 2025-09-09 21:12:34.314000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Step: step-start
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(3)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 3</span>
+                        <span class="expand-icon" id="expand-icon-3">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-3">
+                    <pre>3] 2025-09-09 21:12:34.359000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(4)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 4</span>
+                        <span class="expand-icon" id="expand-icon-4">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-4">
+                    <pre>4] 2025-09-09 21:12:34.360000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(5)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 5</span>
+                        <span class="expand-icon" id="expand-icon-5">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-5">
+                    <pre>5] 2025-09-09 21:12:34.361000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll use the node
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(6)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 6</span>
+                        <span class="expand-icon" id="expand-icon-6">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-6">
+                    <pre>6] 2025-09-09 21:12:34.362000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll use the node_hardware
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(7)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 7</span>
+                        <span class="expand-icon" id="expand-icon-7">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-7">
+                    <pre>7] 2025-09-09 21:12:34.363000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll use the node_hardware_get
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(8)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 8</span>
+                        <span class="expand-icon" id="expand-icon-8">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-8">
+                    <pre>8] 2025-09-09 21:12:34.558000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll use the node_hardware_get_cpu_info tool to
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(9)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 9</span>
+                        <span class="expand-icon" id="expand-icon-9">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-9">
+                    <pre>9] 2025-09-09 21:12:34.559000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll use the node_hardware_get_cpu_info tool to display
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(10)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 10</span>
+                        <span class="expand-icon" id="expand-icon-10">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-10">
+                    <pre>10] 2025-09-09 21:12:34.560000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll use the node_hardware_get_cpu_info tool to display your CPU information.
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(11)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 11</span>
+                        <span class="expand-icon" id="expand-icon-11">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-11">
+                    <pre>11] 2025-09-09 21:12:34.561000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Tool Execution: node_hardware_get_cpu_info
+Call ID: tooluse_L3hRlPegS7SPFb_xYsrSuw
+Status: pending
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(12)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 12</span>
+                        <span class="expand-icon" id="expand-icon-12">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-12">
+                    <pre>12] 2025-09-09 21:12:34.564000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: I'll use the node_hardware_get_cpu_info tool to display your CPU information.
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(13)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:34</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 13</span>
+                        <span class="expand-icon" id="expand-icon-13">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-13">
+                    <pre>13] 2025-09-09 21:12:34.565000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Tool Execution: node_hardware_get_cpu_info
+Call ID: tooluse_L3hRlPegS7SPFb_xYsrSuw
+Status: running
+Tool Input: {}
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(14)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:35</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 14</span>
+                        <span class="expand-icon" id="expand-icon-14">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-14">
+                    <pre>14] 2025-09-09 21:12:35.598000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Tool Execution: node_hardware_get_cpu_info
+Call ID: tooluse_L3hRlPegS7SPFb_xYsrSuw
+Status: completed
+Tool Input: {}
+Tool Result: {
+  "\ud83d\udda5\ufe0f Operation": "Cpu Info",
+  "\u2705 Status": "Success",
+  "\u23f0 Timestamp": "2025-09-09 16:12:35",
+  "\ud83d\udd27 Hardware Data": {
+    "\ud83d\udd27 Logical Cores": 24,
+    "\ud83d\udd27 Physical Cores": 12,
+    "\u26a1 Cpu Model": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M",
+    "\u26a1 Cpu Vendor": "AuthenticAMD",
+    "\ud83d\udd27 Architecture": "x86_64",
+    "\u26a1 Frequency": {
+      "\ud83d\udd27 Current": 1823.344541666667,
+      "\ud83d\udd27 Min": 1596.0,
+      "\ud83d\udd27 Max": 3911.6666666666665
+    },
+    "\ud83d\udcca Usage Per Core": [
+      10.0,
+      9.1,
+      9.1,
+      5.0,
+      4.0,
+      2.0,
+      11.1,
+      5.0,
+      10.2,
+      0.0,
+      5.0,
+      0.0,
+      5.0,
+      0.0,
+      3.0,
+      0.0,
+      3.0,
+      0.0,
+      1.0,
+      0.0,
+      6.9,
+      0.0,
+      2.0,
+      0.0
+    ],
+    "\ud83d\udcca Average Usage": 3.8083333333333336,
+    "\u26a1 Cpu Times": {
+      "\ud83d\udc64 User": 440.59,
+      "\ud83d\udda5\ufe0f System": 121.53,
+      "\ud83d\udd27 Idle": 17243.51
+    },
+    "\ud83d\udd27 Load Average": {
+      "\ud83d\udd27 1Min": 0.953125,
+      "\ud83d\udd27 5Min": 0.71484375,
+      "\ud83d\udd27 15Min": 0.4599609375
+    },
+    "\u26a1 Cpu Flags": [],
+    "\ud83d\udda5\ufe0f System": "Linux"
+  },
+  "\ud83d\udcca Summary": {
+    "\ud83d\udccb Logical Cores": 24,
+    "\ud83d\udccb Physical Cores": 12,
+    "\ud83d\udccb Cpu Model": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M",
+    "\ud83d\udccb Current Freq": 1823.344541666667
+  },
+  "\ud83d\udca1 Insights": [
+    "\u2139\ufe0f System has 24 logical cores",
+    "\u2139\ufe0f System has 12 physical cores"
+  ]
+}
+Execution Time: 1.031s
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(15)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:35</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 15</span>
+                        <span class="expand-icon" id="expand-icon-15">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-15">
+                    <pre>15] 2025-09-09 21:12:35.600000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Step: step-finish
+Tokens: Input=16053, Output=63
+Cost: $0
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(16)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 16</span>
+                        <span class="expand-icon" id="expand-icon-16">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-16">
+                    <pre>16] 2025-09-09 21:12:38.408000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Step: step-start
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(17)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 17</span>
+                        <span class="expand-icon" id="expand-icon-17">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-17">
+                    <pre>17] 2025-09-09 21:12:38.416000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(18)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 18</span>
+                        <span class="expand-icon" id="expand-icon-18">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-18">
+                    <pre>18] 2025-09-09 21:12:38.418000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(19)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 19</span>
+                        <span class="expand-icon" id="expand-icon-19">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-19">
+                    <pre>19] 2025-09-09 21:12:38.420000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(20)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 20</span>
+                        <span class="expand-icon" id="expand-icon-20">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-20">
+                    <pre>20] 2025-09-09 21:12:38.423000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(21)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 21</span>
+                        <span class="expand-icon" id="expand-icon-21">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-21">
+                    <pre>21] 2025-09-09 21:12:38.630000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(22)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 22</span>
+                        <span class="expand-icon" id="expand-icon-22">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-22">
+                    <pre>22] 2025-09-09 21:12:38.631000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(23)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 23</span>
+                        <span class="expand-icon" id="expand-icon-23">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-23">
+                    <pre>23] 2025-09-09 21:12:38.632000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores an
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(24)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 24</span>
+                        <span class="expand-icon" id="expand-icon-24">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-24">
+                    <pre>24] 2025-09-09 21:12:38.649000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(25)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 25</span>
+                        <span class="expand-icon" id="expand-icon-25">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-25">
+                    <pre>25] 2025-09-09 21:12:38.672000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(26)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 26</span>
+                        <span class="expand-icon" id="expand-icon-26">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-26">
+                    <pre>26] 2025-09-09 21:12:38.938000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(27)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 27</span>
+                        <span class="expand-icon" id="expand-icon-27">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-27">
+                    <pre>27] 2025-09-09 21:12:38.941000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyp
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(28)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 28</span>
+                        <span class="expand-icon" id="expand-icon-28">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-28">
+                    <pre>28] 2025-09-09 21:12:38.942000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading).
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(29)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 29</span>
+                        <span class="expand-icon" id="expand-icon-29">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-29">
+                    <pre>29] 2025-09-09 21:12:38.943000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(30)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 30</span>
+                        <span class="expand-icon" id="expand-icon-30">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-30">
+                    <pre>30] 2025-09-09 21:12:38.944000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(31)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 31</span>
+                        <span class="expand-icon" id="expand-icon-31">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-31">
+                    <pre>31] 2025-09-09 21:12:38.956000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at aroun
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(32)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:38</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 32</span>
+                        <span class="expand-icon" id="expand-icon-32">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-32">
+                    <pre>32] 2025-09-09 21:12:38.977000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(33)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 33</span>
+                        <span class="expand-icon" id="expand-icon-33">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-33">
+                    <pre>33] 2025-09-09 21:12:39.323000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(34)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 34</span>
+                        <span class="expand-icon" id="expand-icon-34">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-34">
+                    <pre>34] 2025-09-09 21:12:39.324000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz with a
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(35)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 35</span>
+                        <span class="expand-icon" id="expand-icon-35">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-35">
+                    <pre>35] 2025-09-09 21:12:39.325000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz with a maximum frequency of 3.9 G
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(36)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 36</span>
+                        <span class="expand-icon" id="expand-icon-36">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-36">
+                    <pre>36] 2025-09-09 21:12:39.342000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz with a maximum frequency of 3.9 GHz. Average CPU usage is about
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(37)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 37</span>
+                        <span class="expand-icon" id="expand-icon-37">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-37">
+                    <pre>37] 2025-09-09 21:12:39.343000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz with a maximum frequency of 3.9 GHz. Average CPU usage is about 3.8
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(38)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 38</span>
+                        <span class="expand-icon" id="expand-icon-38">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-38">
+                    <pre>38] 2025-09-09 21:12:39.363000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz with a maximum frequency of 3.9 GHz. Average CPU usage is about 3.8%.
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(39)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 39</span>
+                        <span class="expand-icon" id="expand-icon-39">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-39">
+                    <pre>39] 2025-09-09 21:12:39.448000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Message Text: You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz with a maximum frequency of 3.9 GHz. Average CPU usage is about 3.8%.
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(40)">
+                    <div>
+                        <div class="event-title">📝 message</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 40</span>
+                        <span class="expand-icon" id="expand-icon-40">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-40">
+                    <pre>40] 2025-09-09 21:12:39.450000+00:00
+Type: message.part.updated
+=== CONVERSATION DATA ===
+--- OPENCODE MESSAGE DATA ---
+Step: step-finish
+Tokens: Input=17104, Output=77
+Cost: $0
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            <div class="event-node">
+                <div class="event-header" onclick="toggleEvent(41)">
+                    <div>
+                        <div class="event-title">📝 session</div>
+                        <div class="event-subtitle">21:12:39</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge">Event 41</span>
+                        <span class="expand-icon" id="expand-icon-41">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-41">
+                    <pre>41] 2025-09-09 21:12:39.469000+00:00
+Type: session.idle
+=== CONVERSATION DATA ===
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                </div>
+            </div>
+            
+            </div>
+        </div>
+        
+        <div class="footer">
+            Generated on 2025-09-09 16:35:58 | MCP Evaluation Framework
+        </div>
+    </div>
+    
+    <script>
+        let allExpanded = false;
+        
+        function toggleEvent(eventNum) {
+            const content = document.getElementById('event-content-' + eventNum);
+            const icon = document.getElementById('expand-icon-' + eventNum);
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                icon.classList.remove('expanded');
+            } else {
+                content.classList.add('expanded');
+                icon.classList.add('expanded');
+            }
+        }
+        
+        function toggleAllEvents() {
+            const contents = document.querySelectorAll('.event-content');
+            const icons = document.querySelectorAll('.expand-icon');
+            const button = document.querySelector('.expand-all');
+            
+            allExpanded = !allExpanded;
+            
+            contents.forEach(content => {
+                if (allExpanded) {
+                    content.classList.add('expanded');
+                } else {
+                    content.classList.remove('expanded');
+                }
+            });
+            
+            icons.forEach(icon => {
+                if (allExpanded) {
+                    icon.classList.add('expanded');
+                } else {
+                    icon.classList.remove('expanded');
+                }
+            });
+            
+            button.textContent = allExpanded ? 'Collapse All' : 'Expand All';
+        }
+        
+        // Auto-expand first event
+        document.addEventListener('DOMContentLoaded', function() {
+            const firstEvent = document.getElementById('event-content-1');
+            const firstIcon = document.getElementById('expand-icon-1');
+            if (firstEvent) {
+                firstEvent.classList.add('expanded');
+                firstIcon.classList.add('expanded');
+            }
+        });
+    </script>
+</body>
+</html>
+        

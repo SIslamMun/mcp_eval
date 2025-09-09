@@ -1,18 +1,20 @@
 # MCP Evaluation System
 
-A comprehensive evaluation system for testing MCP (Model Context Protocol) functionality with Claude and OpenCode agents, featuring **parallel multi-model execution** and **unified post-processing**.
+A comprehensive evaluation system for testing MCP (Model Context Protocol) functionality with Claude and OpenCode agents, featuring **parallel multi-model execution**, **unified post-processing**, and **interactive tree visualizations**.
 
 ## ✨ Key Features
 
 - **⚡ Parallel Multi-Model Execution**: Run multiple models simultaneously
 - **📄 JSONL Prompt System**: Efficient prompt loading from `prompts_dataset.jsonl`
-- **🔄 Real-time Progress Tracking**: Live evaluation monitoring
+- **🔄 Real-time Progress Tracking**: Live evaluation monitoring with InfluxDB
+- **🌳 Interactive Tree Visualizations**: Beautiful HTML conversation trees with expand/collapse
 - **🧠 Intelligent Model Validation**: Automatic model detection with suggestions
 - **💰 Cost & Performance Analytics**: Track costs, execution times, success rates
-- **📊 Unified Post-Processing**: Dual-mode report generation (CSV/Advanced)
+- **📊 Unified Post-Processing**: Dual-mode report generation (CSV/Advanced) with user prompt extraction
 - **🧠 Semantic Analysis**: AI-powered evaluation quality assessment beyond simple success/failure
 - **🔍 False Negative Detection**: Identify tasks that technically failed but actually succeeded
 - **🛡️ Unlimited Processing Time**: No artificial timeout constraints
+- **📱 Responsive Design**: Mobile-friendly visualizations for sharing and presentations
 
 ## 🚀 Quick Start
 
@@ -26,8 +28,11 @@ uv venv --clear && source .venv/bin/activate && uv sync
 # Run evaluation
 uv run python -m mcp_evaluation run 1 --agent both --skip-permissions
 
-# Generate reports
+# Generate reports with interactive trees
 uv run python -m mcp_evaluation post-processing
+
+# View interactive visualizations
+uv run python -m mcp_evaluation log-visualizer --serve --port 8080
 
 # Generate reports with AI-powered semantic analysis
 uv run python -m mcp_evaluation post-processing --semantic
@@ -42,6 +47,7 @@ uv run python -m mcp_evaluation post-processing --semantic
 | `run <ID>` | Single prompt evaluation | `run 1 --agent both --skip-permissions` |
 | `run-all` | All prompts evaluation | `run-all --agent both --skip-permissions` |
 | `post-processing` | Generate reports | `post-processing --semantic --verbose` |
+| `log-visualizer` | Interactive tree visualizations | `log-visualizer --serve --port 8080` |
 | `semantic-analysis` | AI-powered quality analysis | `semantic-analysis session <session_id>` |
 | `stats` | View evaluation statistics | `stats` |
 | `models` | List available models | `models --agent both --preference fast` |
@@ -201,23 +207,140 @@ uv run python -m mcp_evaluation semantic-analysis batch --agent both --cost-limi
 - **Sonnet**: Balanced quality and cost (~$0.03/session)  
 - **Opus**: Highest quality analysis (~$0.08/session)
 
+## 🌳 Interactive Tree Visualizations
+
+Beautiful, shareable HTML conversation trees that make evaluation results easy to understand and present.
+
+### Key Features
+- **🌳 Expandable Event Trees**: Click to expand/collapse conversation events
+- **🎨 Beautiful UI**: Modern design with color-coded event types
+- **📱 Mobile Responsive**: Works perfectly on all devices
+- **🔗 Easy Sharing**: Self-contained HTML files work anywhere
+- **👁️ Complete Visibility**: Shows exact prompts with evaluation markers
+- **⚡ Fast Navigation**: Jump between sessions with index page
+
+### Quick Start
+```bash
+# Generate trees for all sessions
+uv run python -m mcp_evaluation log-visualizer
+
+# Start web server to view trees
+uv run python -m mcp_evaluation log-visualizer --serve --port 8080
+
+# Generate tree for specific session
+uv run python -m mcp_evaluation log-visualizer --session reports/claude/session-id/
+```
+
+### Commands
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `log-visualizer` | Generate all tree visualizations | `log-visualizer` |
+| `log-visualizer --serve` | Start web server for viewing | `log-visualizer --serve --port 8080` |
+| `log-visualizer --session` | Generate single session tree | `log-visualizer --session path/to/session/` |
+
+### Generated Files
+
+For each evaluation session, the visualizer creates:
+- **`conversation_tree.html`**: Interactive tree visualization
+- **Navigation index**: `reports/index.html` with overview of all sessions
+
+### Features
+
+**Event Types**:
+- 🔧 **Tool Executions**: Green highlighting with tool details
+- 🤖 **Assistant Responses**: Blue highlighting with response content  
+- 📝 **Messages**: Standard events with timestamps
+- 👤 **User Prompts**: Yellow highlighting showing exact input
+
+**Interactive Elements**:
+- **Expand/Collapse**: Click any event header to view details
+- **Expand All Button**: Quickly open all events at once
+- **Session Metadata**: View duration, event count, tools used
+- **Success Indicators**: Visual status (successful/failed sessions)
+
+### Usage Examples
+
+**View All Sessions**:
+```bash
+uv run python -m mcp_evaluation log-visualizer --serve --port 8080
+# Open browser to http://localhost:8080
+```
+
+**Generate and Share**:
+```bash
+# Generate trees
+uv run python -m mcp_evaluation log-visualizer
+
+# Share HTML files
+cp reports/claude/session-id/conversation_tree.html /path/to/share/
+```
+
+**Custom Port**:
+```bash
+uv run python -m mcp_evaluation log-visualizer --serve --port 3000
+```
+
+### Understanding Session Status
+
+The visualizations help distinguish between different types of sessions:
+
+**✅ Successful MCP Evaluations**: 
+- Shows evaluation prompts with `EVAL_MODEL` and `EVAL_PROMPT_ID` markers
+- Contains tool executions (like CPU info requests)
+- Green success indicators
+
+**❌ Failed MCP Evaluations**:
+- Sessions completed without tool usage  
+- Manual conversations outside evaluation framework
+- Red status indicators (failed MCP criteria, not conversation quality)
+
+### Output Structure
+
+```
+reports/
+├── index.html                           # Main navigation page
+├── claude/
+│   └── session-id/
+│       ├── conversation_tree.html       # Interactive tree
+│       ├── monitoring.log              # Raw log data
+│       └── evaluation_metrics.json     # Session metrics
+└── opencode/
+    └── session-id/
+        ├── conversation_tree.html
+        ├── monitoring.log
+        └── evaluation_metrics.json
+```
+
 ## 📊 Post-Processing
 
-Process InfluxDB monitoring data and generate evaluation metrics with JSON reports and CSV exports.
+Process InfluxDB monitoring data and generate evaluation metrics with JSON reports, CSV exports, and **interactive tree visualizations**.
+
+### Enhanced Features
+
+✨ **New in this version**:
+- **🌳 Interactive HTML Trees**: Beautiful conversation visualizations  
+- **👤 User Prompt Extraction**: Shows exact prompts sent to each agent
+- **🔍 Complete Conversation Flow**: Full visibility into evaluation process
+- **📱 Mobile-Friendly**: Responsive design for sharing and presentations
 
 ### CSV Export Features
 
 Export comprehensive evaluation metrics to CSV files with the same fields as `evaluation_metrics.json`:
 
 ```bash
-# Generate individual session reports + CSV export
+# Generate individual session reports + CSV export + trees
 uv run python -m mcp_evaluation post-processing --csv
 
-# Export CSV with semantic analysis
+# Export CSV with semantic analysis and trees  
 uv run python -m mcp_evaluation post-processing --semantic --csv --verbose
 
 # CSV-only export (skip individual session reports)
 uv run python -m mcp_evaluation post-processing --csv-only --csv-path ./exports/
+
+# Generate trees and start web server
+uv run python -m mcp_evaluation post-processing
+uv run python -m mcp_evaluation log-visualizer --serve --port 8080
 
 # Filter by agent and export CSV with semantic analysis
 uv run python -m mcp_evaluation post-processing --agent claude --semantic --csv
@@ -270,12 +393,14 @@ uv run python -m mcp_evaluation post-processing --output custom_reports/ --seman
 uv run python -m mcp_evaluation test --agent opencode
 uv run python -m mcp_evaluation run 1 --agent both --skip-permissions  
 uv run python -m mcp_evaluation post-processing --semantic --verbose
+uv run python -m mcp_evaluation log-visualizer --serve --port 8080
 ```
 
-### Full Evaluation
+### Full Evaluation with Visualizations
 ```bash
 uv run python -m mcp_evaluation run-all --agent both --skip-permissions
 uv run python -m mcp_evaluation post-processing --semantic --csv --verbose
+uv run python -m mcp_evaluation log-visualizer --serve --port 8080
 ```
 
 ### Advanced Analysis
@@ -310,7 +435,8 @@ uv run python -m mcp_evaluation semantic-analysis batch --limit 20 --cost-limit 
 │   ├── cli.py                   # Command interface
 │   ├── evaluation_engine.py     # Evaluation orchestration
 │   ├── unified_agent.py         # Agent interface
-│   ├── post_processor.py        # Report generation
+│   ├── post_processor.py        # Report generation & user prompt extraction
+│   ├── log_visualizer.py        # Interactive HTML tree generator
 │   ├── semantic_analyzer.py     # AI-powered semantic analysis
 │   ├── session_manager.py       # Database storage
 │   ├── jsonl_prompt_loader.py   # JSONL prompt loader
@@ -318,6 +444,18 @@ uv run python -m mcp_evaluation semantic-analysis batch --limit 20 --cost-limit 
 ├── prompts/                     
 │   ├── prompts_dataset.jsonl    # Primary prompts (7 total)
 │   └── backup_old_format/       # Backup .md files
+├── reports/                     # Generated reports
+│   ├── index.html               # Tree navigation page
+│   ├── claude/                  # Claude session reports
+│   │   └── session-id/
+│   │       ├── conversation_tree.html
+│   │       ├── monitoring.log
+│   │       └── evaluation_metrics.json
+│   └── opencode/                # OpenCode session reports
+│       └── session-id/
+│           ├── conversation_tree.html
+│           ├── monitoring.log
+│           └── evaluation_metrics.json
 ├── scripts/                     # Setup scripts
 └── tests/                       # Unit tests
 ```
@@ -334,4 +472,4 @@ uv run python -m mcp_evaluation <command> --help
 
 ---
 
-**Fast, parallel, comprehensive MCP testing with unlimited processing time.** ⚡📊🚀
+**Fast, parallel, comprehensive MCP testing with beautiful interactive visualizations.** ⚡📊🌳🚀

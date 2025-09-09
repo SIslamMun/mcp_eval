@@ -1682,6 +1682,7 @@ class PostProcessor:
         print(f"   Output directory: {self.output_dir}")
         
         return results
+        print(f"   Output directory: {self.output_dir}")
     
     def export_to_csv(self, output_path: Optional[str] = None, agent_filter: Optional[str] = None) -> str:
         """

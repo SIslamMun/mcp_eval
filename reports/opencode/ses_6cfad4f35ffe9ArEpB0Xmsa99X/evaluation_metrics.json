@@ -1,0 +1,24 @@
+{
+  "generated_at": "2025-09-09T16:12:47.920116",
+  "session_metrics": {
+    "number": 2,
+    "prompt": "1",
+    "session_id": "ses_6cfad4f35ffe9ArEpB0Xmsa99X",
+    "agent_type": "opencode",
+    "model": "github-copilot/claude-3.5-sonnet",
+    "success": true,
+    "execution_time": 9.795,
+    "number_of_calls": 1,
+    "number_of_tool_calls": 1,
+    "tools_used": [
+      "node_hardware_get_cpu_info"
+    ],
+    "cost_usd": null,
+    "response_length": 226,
+    "response_content": "You have an AMD Ryzen AI 9 HX 375 processor with 12 physical cores and 24 logical cores (via hyperthreading). The CPU is currently running at around 1.8 GHz with a maximum frequency of 3.9 GHz. Average CPU usage is about 3.8%.",
+    "created_at": "2025-09-09T21:12:29.674000+00:00",
+    "completed_at": "2025-09-09T21:12:39.469000+00:00",
+    "logfile": "/home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/evaluation_plan_execution/reports/opencode_ses_6cfad4f35ffe9ArEpB0Xmsa99X_monitoring.log",
+    "error_message": null
+  }
+}

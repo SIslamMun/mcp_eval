@@ -1,0 +1,796 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Session Tree: f413138e-a17d-58e8-b285-53cd13046918</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+            padding: 20px;
+            animation: backgroundShift 10s ease-in-out infinite alternate;
+        }
+        
+        @keyframes backgroundShift {
+            0% { background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%); }
+            100% { background: linear-gradient(135deg, #f093fb 0%, #667eea 50%, #764ba2 100%); }
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.2);
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 35px 70px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.3);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1.5" fill="rgba(255,255,255,0.05)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.3;
+        }
+        
+        .header h1 {
+            font-size: 2.8em;
+            margin-bottom: 15px;
+            font-weight: 300;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .header .subtitle {
+            font-size: 1.3em;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+            font-weight: 300;
+        }
+        
+        .session-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .meta-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.03);
+            text-align: center;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .meta-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+        }
+        
+        .meta-card .label {
+            font-size: 0.85em;
+            color: #8b5cf6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .meta-card .value {
+            font-size: 1.3em;
+            font-weight: 700;
+            color: #1e293b;
+            word-break: break-all;
+            overflow-wrap: break-word;
+            max-width: 100%;
+            white-space: normal;
+            line-height: 1.4;
+        }
+        
+        .user-prompt {
+            padding: 30px;
+            background: #fff3cd;
+            border-left: 5px solid #ffc107;
+            margin: 20px;
+            border-radius: 8px;
+        }
+        
+        .user-prompt h3 {
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .user-prompt pre {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #ffeaa7;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .conversation-tree {
+            padding: 30px;
+            position: relative;
+        }
+        
+        .tree-container {
+            position: relative;
+            margin-left: 40px;
+        }
+        
+        .tree-container::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: linear-gradient(to bottom, #667eea, #764ba2);
+            border-radius: 1px;
+        }
+        
+        .tree-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .tree-header h3 {
+            color: #2c3e50;
+            font-size: 1.5em;
+        }
+        
+        .expand-all {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .expand-all:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+        
+        .event-node {
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            margin-left: 40px;
+        }
+        
+        .event-node::before {
+            content: '';
+            position: absolute;
+            left: -40px;
+            top: 50%;
+            width: 20px;
+            height: 2px;
+            background: linear-gradient(to right, #667eea, #764ba2);
+            border-radius: 1px;
+        }
+        
+        .event-node::after {
+            content: '';
+            position: absolute;
+            left: -22px;
+            top: 50%;
+            width: 12px;
+            height: 12px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 50%;
+            transform: translateY(-50%);
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.8);
+            z-index: 2;
+        }
+        
+        .event-node.tool::after {
+            background: linear-gradient(135deg, #10b981, #059669);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+        }
+        
+        .event-node.response::after {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        
+        .event-node.user::after {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+        }
+        
+        .event-node:first-child::after {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+        }
+        
+        .event-node:last-child::after {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+        }
+        
+        .event-node:hover {
+            transform: translateY(-2px) translateX(5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.12);
+        }
+        
+        .event-node:hover::after {
+            transform: translateY(-50%) scale(1.2);
+            box-shadow: 0 0 0 5px rgba(255,255,255,0.9);
+        }
+        
+        .event-header {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            padding: 20px 25px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        
+        .event-header:hover {
+            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            transform: translateX(5px);
+        }
+        
+        .event-header.tool {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            border-left: 5px solid #10b981;
+            position: relative;
+        }
+        
+        .event-header.tool::before {
+            content: '🔧';
+            position: absolute;
+            left: -2px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.2em;
+        }
+        
+        .event-header.response {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-left: 5px solid #2196f3;
+        }
+        
+        .event-title {
+            font-weight: 600;
+            color: #2c3e50;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            max-width: 100%;
+        }
+        
+        .event-subtitle {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 3px;
+        }
+        
+        .event-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        
+        .event-badge.tool {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+        
+        .event-badge.response {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+        
+        .event-content {
+            padding: 20px;
+            background: white;
+            display: none;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .event-content.expanded {
+            display: block;
+        }
+        
+        .event-content pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            border: 1px solid #dee2e6;
+        }
+        
+        .response-content {
+            background: #f0f8ff;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2196f3;
+            margin-top: 15px;
+        }
+        
+        .response-content h4 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+        
+        .tool-content {
+            background: #f1f8e9;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #4caf50;
+            margin-top: 15px;
+        }
+        
+        .tool-content h4 {
+            color: #388e3c;
+            margin-bottom: 10px;
+        }
+        
+        .expand-icon {
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            font-size: 1.3em;
+            color: #667eea;
+            padding: 5px;
+            border-radius: 50%;
+            background: rgba(102, 126, 234, 0.1);
+        }
+        
+        .expand-icon:hover {
+            background: rgba(102, 126, 234, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .expand-icon.expanded {
+            transform: rotate(90deg) scale(1.1);
+            color: #764ba2;
+        }
+        
+        .footer {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .session-meta {
+                grid-template-columns: 1fr;
+            }
+            
+            .tree-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌳 MCP Evaluation Session</h1>
+            <div class="subtitle">Interactive Conversation Tree Viewer</div>
+        </div>
+        
+        <div class="session-meta">
+            <div class="meta-card">
+                <div class="label">Session ID</div>
+                <div class="value">f413138e-a17d-58e8-b285-53cd13046918</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Agent Type</div>
+                <div class="value">claude</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Duration</div>
+                <div class="value">9.33 seconds</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Events</div>
+                <div class="value">5</div>
+            </div>
+            <div class="meta-card">
+                <div class="label">Tools Used</div>
+                <div class="value">mcp__node-hardware-mcp__get_cpu_info</div>
+            </div>
+        </div>
+        
+        
+        <div class="user-prompt">
+            <h3>👤 User Prompt</h3>
+            <pre><!-- EVAL_MODEL:sonnet -->
+<!-- EVAL_PROMPT_ID:1 -->
+# Simple Node Hardware MCP Test
+
+Please show my CPU information.</pre>
+        </div>
+            
+        
+        <div class="conversation-tree">
+            <div class="tree-header">
+                <h3>🌳 Conversation Flow Tree</h3>
+                <button class="expand-all" onclick="toggleAllEvents()">Expand All</button>
+            </div>
+            
+            <div class="tree-container">
+                
+            <div class="event-node tool">
+                <div class="event-header tool" onclick="toggleEvent(1)">
+                    <div>
+                        <div class="event-title">🔧 Tool Execution: mcp__node-hardware-mcp__get_cpu_info</div>
+                        <div class="event-subtitle">21:12:24</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge tool">Event 1</span>
+                        <span class="expand-icon" id="expand-icon-1">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-1">
+                    <pre>1] 2025-09-09 21:12:24.776000+00:00
+Type: PostToolUse
+=== CONVERSATION DATA ===
+--- CLAUDE EVENT DATA ---
+session_id: f413138e-a17d-58e8-b285-53cd13046918
+Transcript File: /home/shazzadul/.claude/projects/-home-shazzadul-Illinois-Tech-Summer25-vcf-iowarp-org-fork-evaluation-plan-execution/f413138e-a17d-58e8-b285-53cd13046918.jsonl
+cwd: /home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/evaluation_plan_execution
+permission_mode: bypassPermissions
+hook_event_name: PostToolUse
+Tool: mcp__node-hardware-mcp__get_cpu_info
+Tool Input: {}
+Tool Response: [
+  {
+    "type": "text",
+    "text": "{\"content\":[{\"text\":\"{\\n  \\\"\\\\ud83d\\\\udda5\\\\ufe0f Operation\\\": \\\"Cpu Info\\\",\\n  \\\"\\\\u2705 Status\\\": \\\"Success\\\",\\n  \\\"\\\\u23f0 Timestamp\\\": \\\"2025-09-09 16:12:24\\\",\\n  \\\"\\\\ud83d\\\\udd27 Hardware Data\\\": {\\n    \\\"\\\\ud83d\\\\udd27 Logical Cores\\\": 24,\\n    \\\"\\\\ud83d\\\\udd27 Physical Cores\\\": 12,\\n    \\\"\\\\u26a1 Cpu Model\\\": \\\"AMD Ryzen AI 9 HX 375 w/ Radeon 890M\\\",\\n    \\\"\\\\u26a1 Cpu Vendor\\\": \\\"AuthenticAMD\\\",\\n    \\\"\\\\ud83d\\\\udd27 Architecture\\\": \\\"x86_64\\\",\\n    \\\"\\\\u26a1 Frequency\\\": {\\n      \\\"\\\\ud83d\\\\udd27 Current\\\": 1689.5736666666664,\\n      \\\"\\\\ud83d\\\\udd27 Min\\\": 1596.0,\\n      \\\"\\\\ud83d\\\\udd27 Max\\\": 3911.6666666666665\\n    },\\n    \\\"\\\\ud83d\\\\udcca Usage Per Core\\\": [\\n      13.0,\\n      6.2,\\n      6.1,\\n      5.0,\\n      6.2,\\n      3.0,\\n      10.2,\\n      4.0,\\n      6.1,\\n      0.0,\\n      6.1,\\n      0.0,\\n      5.0,\\n      0.0,\\n      3.0,\\n      0.0,\\n      1.0,\\n      0.0,\\n      4.1,\\n      0.0,\\n      4.0,\\n      0.0,\\n      3.0,\\n      0.0\\n    ],\\n    \\\"\\\\ud83d\\\\udcca Average Usage\\\": 3.5833333333333335,\\n    \\\"\\\\u26a1 Cpu Times\\\": {\\n      \\\"\\\\ud83d\\\\udc64 User\\\": 430.54,\\n      \\\"\\\\ud83d\\\\udda5\\\\ufe0f System\\\": 118.95,\\n      \\\"\\\\ud83d\\\\udd27 Idle\\\": 16993.22\\n    },\\n    \\\"\\\\ud83d\\\\udd27 Load Average\\\": {\\n      \\\"\\\\ud83d\\\\udd27 1Min\\\": 0.82958984375,\\n      \\\"\\\\ud83d\\\\udd27 5Min\\\": 0.68212890625,\\n      \\\"\\\\ud83d\\\\udd27 15Min\\\": 0.44482421875\\n    },\\n    \\\"\\\\u26a1 Cpu Flags\\\": [],\\n    \\\"\\\\ud83d\\\\udda5\\\\ufe0f System\\\": \\\"Linux\\\"\\n  },\\n  \\\"\\\\ud83d\\\\udcca Summary\\\": {\\n    \\\"\\\\ud83d\\\\udccb Logical Cores\\\": 24,\\n    \\\"\\\\ud83d\\\\udccb Physical Cores\\\": 12,\\n    \\\"\\\\ud83d\\\\udccb Cpu Model\\\": \\\"AMD Ryzen AI 9 HX 375 w/ Radeon 890M\\\",\\n    \\\"\\\\ud83d\\\\udccb Current Freq\\\": 1689.5736666666664\\n  },\\n  \\\"\\\\ud83d\\\\udca1 Insights\\\": [\\n    \\\"\\\\u2139\\\\ufe0f System has 24 logical cores\\\",\\n    \\\"\\\\u2139\\\\ufe0f System has 12 physical cores\\\"\\n  ]\\n}\"}],\"_meta\":{\"tool\":\"cpu_info\",\"success\":true,\"hostname\":null},\"isError\":false}"
+  }
+]
+--- CLAUDE CONVERSATION ---
+Assistant Response: **AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                <div class="response-content">
+                    <h4>Assistant Response:</h4>
+                    <div>**AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64</div>
+                </div>
+                
+                <div class="tool-content">
+                    <h4>Tool: mcp__node-hardware-mcp__get_cpu_info</h4>
+                    <div>Execution details in raw content above</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="event-node tool">
+                <div class="event-header tool" onclick="toggleEvent(2)">
+                    <div>
+                        <div class="event-title">🔧 Tool Execution: mcp__node-hardware-mcp__get_cpu_info</div>
+                        <div class="event-subtitle">21:12:23</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge tool">Event 2</span>
+                        <span class="expand-icon" id="expand-icon-2">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-2">
+                    <pre>2] 2025-09-09 21:12:23.474000+00:00
+Type: PreToolUse
+=== CONVERSATION DATA ===
+--- CLAUDE EVENT DATA ---
+session_id: f413138e-a17d-58e8-b285-53cd13046918
+Transcript File: /home/shazzadul/.claude/projects/-home-shazzadul-Illinois-Tech-Summer25-vcf-iowarp-org-fork-evaluation-plan-execution/f413138e-a17d-58e8-b285-53cd13046918.jsonl
+cwd: /home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/evaluation_plan_execution
+permission_mode: bypassPermissions
+hook_event_name: PreToolUse
+Tool: mcp__node-hardware-mcp__get_cpu_info
+Tool Input: {}
+--- CLAUDE CONVERSATION ---
+Assistant Response: **AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                <div class="response-content">
+                    <h4>Assistant Response:</h4>
+                    <div>**AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64</div>
+                </div>
+                
+                <div class="tool-content">
+                    <h4>Tool: mcp__node-hardware-mcp__get_cpu_info</h4>
+                    <div>Execution details in raw content above</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="event-node response">
+                <div class="event-header response" onclick="toggleEvent(3)">
+                    <div>
+                        <div class="event-title">🤖 Assistant Response</div>
+                        <div class="event-subtitle">21:12:19</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge response">Event 3</span>
+                        <span class="expand-icon" id="expand-icon-3">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-3">
+                    <pre>3] 2025-09-09 21:12:19.742000+00:00
+Type: SessionStart
+=== CONVERSATION DATA ===
+--- CLAUDE EVENT DATA ---
+session_id: f413138e-a17d-58e8-b285-53cd13046918
+Transcript File: /home/shazzadul/.claude/projects/-home-shazzadul-Illinois-Tech-Summer25-vcf-iowarp-org-fork-evaluation-plan-execution/f413138e-a17d-58e8-b285-53cd13046918.jsonl
+cwd: /home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/evaluation_plan_execution
+hook_event_name: SessionStart
+source: startup
+--- CLAUDE CONVERSATION ---
+Assistant Response: **AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                <div class="response-content">
+                    <h4>Assistant Response:</h4>
+                    <div>**AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="event-node response">
+                <div class="event-header response" onclick="toggleEvent(4)">
+                    <div>
+                        <div class="event-title">🤖 Assistant Response</div>
+                        <div class="event-subtitle">21:12:29</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge response">Event 4</span>
+                        <span class="expand-icon" id="expand-icon-4">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-4">
+                    <pre>4] 2025-09-09 21:12:29.072000+00:00
+Type: Stop
+=== CONVERSATION DATA ===
+--- CLAUDE EVENT DATA ---
+session_id: f413138e-a17d-58e8-b285-53cd13046918
+Transcript File: /home/shazzadul/.claude/projects/-home-shazzadul-Illinois-Tech-Summer25-vcf-iowarp-org-fork-evaluation-plan-execution/f413138e-a17d-58e8-b285-53cd13046918.jsonl
+cwd: /home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/evaluation_plan_execution
+permission_mode: bypassPermissions
+hook_event_name: Stop
+stop_hook_active: False
+--- CLAUDE CONVERSATION ---
+Assistant Response: **AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                <div class="response-content">
+                    <h4>Assistant Response:</h4>
+                    <div>**AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            <div class="event-node response">
+                <div class="event-header response" onclick="toggleEvent(5)">
+                    <div>
+                        <div class="event-title">🤖 Assistant Response</div>
+                        <div class="event-subtitle">21:12:19</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="event-badge response">Event 5</span>
+                        <span class="expand-icon" id="expand-icon-5">▶</span>
+                    </div>
+                </div>
+                <div class="event-content" id="event-content-5">
+                    <pre>5] 2025-09-09 21:12:19.944000+00:00
+Type: UserPromptSubmit
+=== CONVERSATION DATA ===
+--- CLAUDE EVENT DATA ---
+session_id: f413138e-a17d-58e8-b285-53cd13046918
+Transcript File: /home/shazzadul/.claude/projects/-home-shazzadul-Illinois-Tech-Summer25-vcf-iowarp-org-fork-evaluation-plan-execution/f413138e-a17d-58e8-b285-53cd13046918.jsonl
+cwd: /home/shazzadul/Illinois_Tech/Summer25/vcf/iowarp-org/fork/evaluation_plan_execution
+permission_mode: bypassPermissions
+hook_event_name: UserPromptSubmit
+--- USER PROMPT ---
+Original Prompt: <!-- EVAL_MODEL:sonnet -->
+<!-- EVAL_PROMPT_ID:1 -->
+# Simple Node Hardware MCP Test
+
+Please show my CPU information.
+--- CLAUDE CONVERSATION ---
+Assistant Response: **AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64
+=== END CONVERSATION DATA ===
+----------------------------------------
+
+</pre>
+                <div class="response-content">
+                    <h4>Assistant Response:</h4>
+                    <div>**AMD Ryzen AI 9 HX 375 w/ Radeon 890M**
+- 12 physical cores, 24 logical cores (with hyperthreading)
+- Current frequency: 1,690 MHz (min: 1,596 MHz, max: 3,912 MHz)
+- Average CPU usage: 3.6%
+- Load averages: 0.83 (1min), 0.68 (5min), 0.44 (15min)
+- Architecture: x86_64</div>
+                </div>
+                
+                </div>
+            </div>
+            
+            </div>
+        </div>
+        
+        <div class="footer">
+            Generated on 2025-09-09 16:35:58 | MCP Evaluation Framework
+        </div>
+    </div>
+    
+    <script>
+        let allExpanded = false;
+        
+        function toggleEvent(eventNum) {
+            const content = document.getElementById('event-content-' + eventNum);
+            const icon = document.getElementById('expand-icon-' + eventNum);
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                icon.classList.remove('expanded');
+            } else {
+                content.classList.add('expanded');
+                icon.classList.add('expanded');
+            }
+        }
+        
+        function toggleAllEvents() {
+            const contents = document.querySelectorAll('.event-content');
+            const icons = document.querySelectorAll('.expand-icon');
+            const button = document.querySelector('.expand-all');
+            
+            allExpanded = !allExpanded;
+            
+            contents.forEach(content => {
+                if (allExpanded) {
+                    content.classList.add('expanded');
+                } else {
+                    content.classList.remove('expanded');
+                }
+            });
+            
+            icons.forEach(icon => {
+                if (allExpanded) {
+                    icon.classList.add('expanded');
+                } else {
+                    icon.classList.remove('expanded');
+                }
+            });
+            
+            button.textContent = allExpanded ? 'Collapse All' : 'Expand All';
+        }
+        
+        // Auto-expand first event
+        document.addEventListener('DOMContentLoaded', function() {
+            const firstEvent = document.getElementById('event-content-1');
+            const firstIcon = document.getElementById('expand-icon-1');
+            if (firstEvent) {
+                firstEvent.classList.add('expanded');
+                firstIcon.classList.add('expanded');
+            }
+        });
+    </script>
+</body>
+</html>
+        

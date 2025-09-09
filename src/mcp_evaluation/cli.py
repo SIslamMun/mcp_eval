@@ -26,10 +26,16 @@ logger = logging.getLogger(__name__)
 
 # Global flag for graceful shutdown
 shutdown_requested = False
+in_server_mode = False
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C and other termination signals gracefully."""
-    global shutdown_requested
+    global shutdown_requested, in_server_mode
+    
+    # If we're in server mode, let the server handle the signal
+    if in_server_mode:
+        raise KeyboardInterrupt()
+    
     shutdown_requested = True
     console.print("\n[yellow]⚠️  Shutdown requested. Stopping evaluation...[/yellow]")
     console.print("[dim]Press Ctrl+C again to force quit[/dim]")
@@ -42,7 +48,21 @@ signal.signal(signal.SIGTERM, signal_handler)
 @click.group()
 @click.version_option()
 def main():
-    """MCP Evaluation Infrastructure - Evaluate Claude Code and OpenCode agents."""
+    """MCP Evaluation Infrastructure - Evaluate Claude Code and OpenCode agents.
+    
+    Available commands:
+    • setup          - Initialize evaluation infrastructure
+    • models         - List available models for agents
+    • run           - Execute evaluation for specific prompt
+    • batch         - Execute batch evaluation for multiple prompts
+    • run-all       - Run all available prompts automatically
+    • stats         - Display evaluation statistics
+    • post-processing - Process InfluxDB data and generate reports
+    • viz           - Tree visualization commands
+    • semantic-analysis - Semantic analysis commands
+    • test          - Quick agent functionality test
+    • cleanup       - Clean up stuck processes
+    """
     pass
 
 
@@ -1270,6 +1290,476 @@ def _get_model_name(result, multi_result):
     
     return "unknown"
 
+
+
+@main.group()
+def viz():
+    """Visualization commands for MCP evaluation results."""
+    pass
+
+
+@viz.command("tree")
+@click.option("--port", "-p", type=int, default=8081, help="Port for web server (default: 8081)")
+@click.option("--reports-dir", default="reports", help="Reports directory path (default: reports)")
+@click.option("--serve", "-s", is_flag=True, help="Start web server after generating trees")
+@click.option("--regenerate", "-r", is_flag=True, help="Regenerate HTML files even if they exist")
+def generate_tree(port: int, reports_dir: str, serve: bool, regenerate: bool):
+    """Generate interactive conversation tree visualizations from evaluation sessions."""
+    console.print("[bold blue]🌳 Generating Conversation Tree Visualizations[/bold blue]\n")
+    
+    try:
+        from .log_visualizer import LogTreeVisualizer
+        
+        # Initialize visualizer
+        visualizer = LogTreeVisualizer(reports_dir)
+        
+        # Check if reports directory exists
+        reports_path = Path(reports_dir)
+        if not reports_path.exists():
+            console.print(f"[red]❌ Reports directory not found: {reports_dir}[/red]")
+            console.print("Run post-processing first: mcp-eval post-processing")
+            return
+        
+        # Count available sessions
+        session_count = 0
+        for agent_dir in reports_path.iterdir():
+            if agent_dir.is_dir() and agent_dir.name in ["claude", "opencode"]:
+                for session_dir in agent_dir.iterdir():
+                    if session_dir.is_dir() and (session_dir / "monitoring.log").exists():
+                        session_count += 1
+        
+        if session_count == 0:
+            console.print(f"[yellow]⚠️  No evaluation sessions found in {reports_dir}[/yellow]")
+            console.print("Run evaluations first: mcp-eval run <prompt_id>")
+            return
+        
+        console.print(f"[cyan]Found {session_count} evaluation sessions[/cyan]")
+        console.print(f"[cyan]Reports directory:[/cyan] {reports_dir}")
+        console.print(f"[cyan]Regenerate mode:[/cyan] {'Enabled' if regenerate else 'Disabled'}")
+        
+        # Generate tree visualizations
+        with console.status("Generating tree visualizations..."):
+            generated_files = visualizer.generate_all_trees(regenerate=regenerate)
+            tree_count = len(generated_files)
+        
+        console.print(f"[green]✅ Generated {tree_count} tree visualizations![/green]")
+        
+        # Start web server if requested
+        if serve:
+            console.print(f"\n[bold blue]🌐 Starting web server on port {port}...[/bold blue]")
+            console.print(f"[cyan]URL:[/cyan] http://localhost:{port}")
+            console.print("[dim]Press Ctrl+C to stop the server[/dim]\n")
+            
+            import http.server
+            import socketserver
+            import os
+            from threading import Thread
+            import webbrowser
+            import time
+            
+            # Change to reports directory
+            original_cwd = os.getcwd()
+            os.chdir(reports_path)
+            
+            try:
+                # Start server
+                Handler = http.server.SimpleHTTPRequestHandler
+                # Make sure to enable reuse address to avoid "Address already in use" errors
+                socketserver.TCPServer.allow_reuse_address = True
+                
+                with socketserver.TCPServer(("", port), Handler) as httpd:
+                    console.print(f"📁 Serving files from: {reports_path.absolute()}")
+                    console.print("🔗 Open browser to view tree visualizations")
+                    
+                    # Try to open browser automatically after a short delay
+                    def open_browser():
+                        time.sleep(1)
+                        try:
+                            webbrowser.open(f"http://localhost:{port}")
+                        except:
+                            pass
+                    
+                    browser_thread = Thread(target=open_browser, daemon=True)
+                    browser_thread.start()
+                    
+                    # Serve forever with proper signal handling
+                    try:
+                        httpd.serve_forever()
+                    except KeyboardInterrupt:
+                        console.print("\n[yellow]👋 Stopping server...[/yellow]")
+                        httpd.shutdown()
+                        httpd.server_close()
+                        
+            except KeyboardInterrupt:
+                console.print("\n[yellow]👋 Server stopped[/yellow]")
+            except OSError as e:
+                if "Address already in use" in str(e):
+                    console.print(f"[red]❌ Port {port} is already in use[/red]")
+                    console.print(f"Try a different port: mcp-eval viz tree --serve --port {port + 1}")
+                else:
+                    console.print(f"[red]❌ Server error: {e}[/red]")
+            finally:
+                os.chdir(original_cwd)
+        else:
+            console.print(f"\n[bold]🌐 To view the visualizations:[/bold]")
+            console.print(f"  mcp-eval viz serve --port {port}")
+            console.print(f"  # or manually: cd {reports_dir} && python -m http.server {port}")
+    
+    except Exception as e:
+        console.print(f"[red]❌ Tree generation failed: {e}[/red]")
+        logger.exception("Tree generation failed")
+        sys.exit(1)
+
+
+@viz.command("serve")
+@click.option("--port", "-p", type=int, default=8081, help="Port for web server (default: 8081)")
+@click.option("--reports-dir", default="reports", help="Reports directory path (default: reports)")
+@click.option("--open-browser", "-o", is_flag=True, help="Automatically open browser")
+def serve_viz(port: int, reports_dir: str, open_browser: bool):
+    """Start web server to view tree visualizations."""
+    console.print(f"[bold blue]🌐 Starting Visualization Server[/bold blue]\n")
+    
+    try:
+        import http.server
+        import socketserver
+        import os
+        import webbrowser
+        import time
+        from threading import Thread
+        
+        # Check if reports directory exists
+        reports_path = Path(reports_dir)
+        if not reports_path.exists():
+            console.print(f"[red]❌ Reports directory not found: {reports_dir}[/red]")
+            return
+        
+        # Check if index.html exists
+        index_file = reports_path / "index.html"
+        if not index_file.exists():
+            console.print(f"[yellow]⚠️  No index.html found. Generating trees first...[/yellow]")
+            from .log_visualizer import LogTreeVisualizer
+            visualizer = LogTreeVisualizer(reports_dir)
+            tree_count = visualizer.generate_all_trees()
+            console.print(f"[green]✅ Generated {tree_count} tree visualizations![/green]\n")
+        
+        console.print(f"[cyan]Port:[/cyan] {port}")
+        console.print(f"[cyan]Directory:[/cyan] {reports_path.absolute()}")
+        console.print(f"[cyan]URL:[/cyan] http://localhost:{port}")
+        console.print("[dim]Press Ctrl+C to stop the server[/dim]\n")
+        
+        # Change to reports directory
+        original_cwd = os.getcwd()
+        os.chdir(reports_path)
+        
+        try:
+            # Start server
+            Handler = http.server.SimpleHTTPRequestHandler
+            # Enable address reuse to avoid "Address already in use" errors
+            socketserver.TCPServer.allow_reuse_address = True
+            
+            with socketserver.TCPServer(("", port), Handler) as httpd:
+                console.print(f"📁 Serving files from: {reports_path.absolute()}")
+                console.print("🔗 Server is ready!")
+                
+                # Open browser if requested
+                if open_browser:
+                    def open_browser_delayed():
+                        time.sleep(1)
+                        try:
+                            webbrowser.open(f"http://localhost:{port}")
+                            console.print("🌐 Opened browser automatically")
+                        except Exception as e:
+                            console.print(f"[yellow]Could not open browser: {e}[/yellow]")
+                    
+                    browser_thread = Thread(target=open_browser_delayed, daemon=True)
+                    browser_thread.start()
+                
+                # Serve with proper signal handling
+                try:
+                    httpd.serve_forever()
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]👋 Stopping server...[/yellow]")
+                    httpd.shutdown()
+                    httpd.server_close()
+                    
+        except KeyboardInterrupt:
+            console.print("\n[yellow]👋 Server stopped[/yellow]")
+        except OSError as e:
+            if "Address already in use" in str(e):
+                console.print(f"[red]❌ Port {port} is already in use[/red]")
+                console.print(f"Try a different port: mcp-eval viz serve --port {port + 1}")
+            else:
+                raise
+        finally:
+            os.chdir(original_cwd)
+    
+    except Exception as e:
+        console.print(f"[red]❌ Server failed: {e}[/red]")
+        logger.exception("Server failed")
+        sys.exit(1)
+
+
+@viz.command("list")
+@click.option("--reports-dir", default="reports", help="Reports directory path (default: reports)")
+def list_sessions(reports_dir: str):
+    """List available evaluation sessions for tree visualization."""
+    console.print("[bold blue]📋 Available Evaluation Sessions[/bold blue]\n")
+    
+    try:
+        reports_path = Path(reports_dir)
+        if not reports_path.exists():
+            console.print(f"[red]❌ Reports directory not found: {reports_dir}[/red]")
+            return
+        
+        # Scan for sessions
+        sessions = []
+        for agent_dir in reports_path.iterdir():
+            if agent_dir.is_dir() and agent_dir.name in ["claude", "opencode"]:
+                for session_dir in agent_dir.iterdir():
+                    if session_dir.is_dir():
+                        log_file = session_dir / "monitoring.log"
+                        metrics_file = session_dir / "evaluation_metrics.json"
+                        tree_file = session_dir / "conversation_tree.html"
+                        
+                        session_info = {
+                            'agent': agent_dir.name,
+                            'session_id': session_dir.name,
+                            'has_log': log_file.exists(),
+                            'has_metrics': metrics_file.exists(),
+                            'has_tree': tree_file.exists(),
+                            'path': session_dir
+                        }
+                        
+                        # Try to get metrics if available
+                        if metrics_file.exists():
+                            try:
+                                import json
+                                with open(metrics_file, 'r') as f:
+                                    metrics_data = json.load(f)
+                                    session_metrics = metrics_data.get('session_metrics', {})
+                                    session_info.update({
+                                        'success': session_metrics.get('success', False),
+                                        'created_at': session_metrics.get('created_at', 'Unknown'),
+                                        'prompt': session_metrics.get('prompt', 'Unknown'),
+                                        'model': session_metrics.get('model', 'Unknown')
+                                    })
+                            except:
+                                pass
+                        
+                        sessions.append(session_info)
+        
+        if not sessions:
+            console.print(f"[yellow]No evaluation sessions found in {reports_dir}[/yellow]")
+            console.print("Run evaluations first: mcp-eval run <prompt_id>")
+            return
+        
+        # Sort sessions by agent and creation time
+        sessions.sort(key=lambda x: (x['agent'], x.get('created_at', '')))
+        
+        # Create table
+        table = Table(title=f"Evaluation Sessions ({len(sessions)} total)")
+        table.add_column("Agent", style="cyan")
+        table.add_column("Session ID", style="magenta", max_width=25)
+        table.add_column("Success", style="green")
+        table.add_column("Prompt", style="yellow")
+        table.add_column("Model", style="blue")
+        table.add_column("Tree", style="dim")
+        table.add_column("Created", style="dim")
+        
+        for session in sessions:
+            success_icon = "✅" if session.get('success', False) else "❌"
+            tree_icon = "🌳" if session['has_tree'] else "❌"
+            
+            # Truncate long session IDs
+            session_id = session['session_id']
+            if len(session_id) > 25:
+                session_id = session_id[:22] + "..."
+            
+            created_at = session.get('created_at', 'Unknown')
+            if created_at != 'Unknown' and len(created_at) > 16:
+                created_at = created_at[:16]
+            
+            table.add_row(
+                session['agent'].title(),
+                session_id,
+                success_icon,
+                str(session.get('prompt', 'Unknown')),
+                session.get('model', 'Unknown'),
+                tree_icon,
+                created_at
+            )
+        
+        console.print(table)
+        
+        # Summary
+        claude_count = len([s for s in sessions if s['agent'] == 'claude'])
+        opencode_count = len([s for s in sessions if s['agent'] == 'opencode'])
+        tree_count = len([s for s in sessions if s['has_tree']])
+        success_count = len([s for s in sessions if s.get('success', False)])
+        
+        console.print(f"\n[bold]📊 Summary:[/bold]")
+        console.print(f"  • Claude sessions: {claude_count}")
+        console.print(f"  • OpenCode sessions: {opencode_count}")
+        console.print(f"  • With trees: {tree_count}/{len(sessions)}")
+        console.print(f"  • Successful: {success_count}/{len(sessions)}")
+        
+        if tree_count > 0:
+            console.print(f"\n[bold]🌐 To view trees:[/bold]")
+            console.print(f"  mcp-eval viz serve --port 8081")
+        else:
+            console.print(f"\n[bold]🌳 To generate trees:[/bold]")
+            console.print(f"  mcp-eval viz tree --serve")
+    
+    except Exception as e:
+        console.print(f"[red]❌ Failed to list sessions: {e}[/red]")
+        logger.exception("Failed to list sessions")
+        sys.exit(1)
+
+
+@main.command("log-visualizer")
+@click.option("--serve", "-s", is_flag=True, help="Start web server to view visualizations")
+@click.option("--port", "-p", type=int, default=8080, help="Port for web server (default: 8080)")
+@click.option("--session", help="Generate tree for specific session directory")
+@click.option("--reports-dir", default="reports", help="Reports directory path (default: reports)")
+def log_visualizer(serve: bool, port: int, session: str, reports_dir: str):
+    """Generate interactive conversation tree visualizations from evaluation sessions.
+    
+    Examples:
+      # Generate trees for all sessions
+      mcp-eval log-visualizer
+      
+      # Start web server to view trees  
+      mcp-eval log-visualizer --serve --port 8080
+      
+      # Generate tree for specific session
+      mcp-eval log-visualizer --session reports/claude/session-id/
+    """
+    try:
+        from .log_visualizer import LogTreeVisualizer
+        from pathlib import Path
+        import http.server
+        import socketserver
+        import os
+        import webbrowser
+        import time
+        from threading import Thread
+        
+        # Initialize visualizer
+        visualizer = LogTreeVisualizer(reports_dir)
+        
+        if session:
+            # Generate tree for specific session
+            console.print(f"[bold blue]🌳 Generating tree for session: {session}[/bold blue]\n")
+            
+            session_path = Path(session)
+            if not session_path.exists():
+                console.print(f"[red]❌ Session directory not found: {session}[/red]")
+                return
+            
+            if not (session_path / "monitoring.log").exists():
+                console.print(f"[red]❌ monitoring.log not found in: {session}[/red]")
+                return
+            
+            try:
+                html_file = visualizer.generate_session_tree(session_path)
+                console.print(f"[green]✅ Generated tree: {html_file}[/green]")
+            except Exception as e:
+                console.print(f"[red]❌ Failed to generate tree: {e}[/red]")
+                logger.exception("Tree generation failed")
+                return
+        else:
+            # Generate trees for all sessions
+            console.print("[bold blue]🌳 Generating trees for all sessions[/bold blue]\n")
+            
+            reports_path = Path(reports_dir)
+            if not reports_path.exists():
+                console.print(f"[red]❌ Reports directory not found: {reports_dir}[/red]")
+                console.print("Run post-processing first: mcp-eval post-processing")
+                return
+            
+            # Count available sessions
+            session_count = 0
+            for agent_dir in reports_path.iterdir():
+                if agent_dir.is_dir() and agent_dir.name in ["claude", "opencode"]:
+                    for session_dir in agent_dir.iterdir():
+                        if session_dir.is_dir() and (session_dir / "monitoring.log").exists():
+                            session_count += 1
+            
+            if session_count == 0:
+                console.print(f"[yellow]⚠️  No evaluation sessions found in {reports_dir}[/yellow]")
+                console.print("Run evaluations first: mcp-eval run <prompt_id>")
+                return
+            
+            console.print(f"[cyan]Found {session_count} evaluation sessions[/cyan]")
+            
+            # Generate all trees
+            with console.status("Generating tree visualizations..."):
+                generated_files = visualizer.generate_all_trees()
+                tree_count = len(generated_files)
+            
+            console.print(f"[green]✅ Generated {tree_count} tree visualizations![/green]")
+        
+        # Start web server if requested
+        if serve:
+            global in_server_mode
+            in_server_mode = True
+            
+            console.print(f"\n[bold blue]🌐 Starting web server on port {port}...[/bold blue]")
+            console.print(f"[cyan]URL:[/cyan] http://localhost:{port}")
+            console.print("[dim]Press Ctrl+C to stop the server[/dim]\n")
+            
+            reports_path = Path(reports_dir)
+            original_cwd = os.getcwd()
+            os.chdir(reports_path)
+            
+            try:
+                # Start server with proper signal handling
+                Handler = http.server.SimpleHTTPRequestHandler
+                socketserver.TCPServer.allow_reuse_address = True
+                
+                with socketserver.TCPServer(("", port), Handler) as httpd:
+                    console.print(f"📁 Serving files from: {reports_path.absolute()}")
+                    console.print("🔗 Open browser to view tree visualizations")
+                    
+                    # Auto-open browser
+                    def open_browser():
+                        time.sleep(1)
+                        try:
+                            webbrowser.open(f"http://localhost:{port}")
+                        except:
+                            pass
+                    
+                    browser_thread = Thread(target=open_browser, daemon=True)
+                    browser_thread.start()
+                    
+                    # Serve with clean shutdown
+                    try:
+                        httpd.serve_forever()
+                    except KeyboardInterrupt:
+                        console.print("\n[yellow]👋 Stopping server...[/yellow]")
+                        
+            except KeyboardInterrupt:
+                console.print("\n[yellow]👋 Server stopped[/yellow]")
+            except OSError as e:
+                if "Address already in use" in str(e):
+                    console.print(f"[red]❌ Port {port} is already in use[/red]")
+                    console.print(f"Try a different port: mcp-eval log-visualizer --serve --port {port + 1}")
+                else:
+                    console.print(f"[red]❌ Server error: {e}[/red]")
+            finally:
+                in_server_mode = False
+                os.chdir(original_cwd)
+                console.print("[green]✅ Server cleanup completed[/green]")
+        elif not session:
+            # Show how to view the generated trees
+            console.print(f"\n[bold]🌐 To view the visualizations:[/bold]")
+            console.print(f"  mcp-eval log-visualizer --serve --port {port}")
+            console.print(f"  # Open browser to: http://localhost:{port}")
+    
+    except Exception as e:
+        console.print(f"[red]❌ Log visualizer failed: {e}[/red]")
+        logger.exception("Log visualizer failed")
+        sys.exit(1)
 
 
 @main.group()
