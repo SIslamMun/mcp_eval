@@ -998,17 +998,32 @@ def stats(config: Optional[str]):
 @click.option("--output", "-o", default="reports/", help="Output directory (default: reports/)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed progress and results")
 @click.option("--agent", "-a", type=click.Choice(['claude', 'opencode']), help="Filter by agent type (claude or opencode)")
+@click.option("--csv", is_flag=True, help="Export results to CSV file")
+@click.option("--csv-path", type=str, help="Custom path for CSV file (directory or full file path)")
+@click.option("--csv-only", is_flag=True, help="Only export CSV without generating individual session reports")
 def post_processing(
     output: str,
     verbose: bool,
-    agent: Optional[str]
+    agent: Optional[str],
+    csv: bool,
+    csv_path: Optional[str],
+    csv_only: bool
 ):
     """Process InfluxDB monitoring data and generate evaluation metrics.
     
     This command processes all evaluation sessions from InfluxDB and generates
-    individual session reports with metrics in JSON format.
+    individual session reports with metrics in JSON format. Can also export
+    comprehensive CSV files with all metrics.
     """
     console.print("[bold blue]🔄 MCP Evaluation Post-Processing[/bold blue]\n")
+    
+    # Validate and auto-enable CSV options
+    if csv_only:
+        csv = True  # Auto-enable CSV when csv-only is specified
+    
+    if csv_path and not (csv or csv_only):
+        console.print("[yellow]⚠️  Warning: --csv-path specified but CSV export not enabled. Adding --csv flag.[/yellow]")
+        csv = True
     
     try:
         from .post_processor import PostProcessor
@@ -1022,43 +1037,62 @@ def post_processing(
             console.print(f"[cyan]Database:[/cyan] {processor.config['INFLUXDB_BUCKET']}")
             if agent:
                 console.print(f"[cyan]Agent Filter:[/cyan] {agent}")
+            if csv or csv_only:
+                csv_output = csv_path if csv_path else output
+                console.print(f"[cyan]CSV Export:[/cyan] {csv_output}")
             console.print()
         
-        # Run the processing with agent filtering
-        if agent:
-            console.print(f"[bold]🚀 Processing InfluxDB monitoring data for {agent} sessions...[/bold]")
-            if agent == 'claude':
-                # Extract and process only Claude sessions
-                claude_sessions = processor.extract_claude_sessions()
-                console.print(f"📊 Found {len(claude_sessions)} Claude sessions to process")
-                
-                session_results = []
-                for i, session in enumerate(claude_sessions, 1):
-                    session_result = processor.process_single_session(session, i)
-                    session_results.append(session_result)
-                
-                results = {"sessions": session_results, "total": len(claude_sessions)}
-                
-            elif agent == 'opencode':
-                # Extract and process only OpenCode sessions
-                opencode_sessions = processor._extract_opencode_sessions()
-                console.print(f"📊 Found {len(opencode_sessions)} OpenCode sessions to process")
-                
-                session_results = []
-                for i, session in enumerate(opencode_sessions, 1):
-                    session_result = processor.process_single_session(session, i)
-                    session_results.append(session_result)
-                
-                results = {"sessions": session_results, "total": len(opencode_sessions)}
+        results = None
+        
+        # Handle CSV-only export (skip individual session reports)
+        if csv_only:
+            console.print("[bold]📊 CSV-only export mode - generating comprehensive CSV...[/bold]")
+            csv_file = processor.export_to_csv(output_path=csv_path, agent_filter=agent)
+            console.print(f"\n[bold green]✅ CSV export completed![/bold green]")
+            console.print(f"[cyan]CSV file:[/cyan] {csv_file}")
         else:
-            console.print("[bold]🚀 Processing all InfluxDB monitoring data...[/bold]")
-            results = processor.process_all()
+            # Run the standard processing with agent filtering
+            if agent:
+                console.print(f"[bold]🚀 Processing InfluxDB monitoring data for {agent} sessions...[/bold]")
+                if agent == 'claude':
+                    # Extract and process only Claude sessions
+                    claude_sessions = processor.extract_claude_sessions()
+                    console.print(f"📊 Found {len(claude_sessions)} Claude sessions to process")
+                    
+                    session_results = []
+                    for i, session in enumerate(claude_sessions, 1):
+                        session_result = processor.process_single_session(session, i)
+                        session_results.append(session_result)
+                    
+                    results = {"sessions": session_results, "total": len(claude_sessions)}
+                    
+                elif agent == 'opencode':
+                    # Extract and process only OpenCode sessions
+                    opencode_sessions = processor._extract_opencode_sessions()
+                    console.print(f"📊 Found {len(opencode_sessions)} OpenCode sessions to process")
+                    
+                    session_results = []
+                    for i, session in enumerate(opencode_sessions, 1):
+                        session_result = processor.process_single_session(session, i)
+                        session_results.append(session_result)
+                    
+                    results = {"sessions": session_results, "total": len(opencode_sessions)}
+            else:
+                console.print("[bold]🚀 Processing all InfluxDB monitoring data...[/bold]")
+                results = processor.process_all()
+            
+            # Generate CSV export if requested
+            if csv:
+                console.print(f"\n[bold]📊 Generating CSV export...[/bold]")
+                csv_file = processor.export_to_csv(output_path=csv_path, agent_filter=agent)
+                console.print(f"[cyan]CSV file:[/cyan] {csv_file}")
         
         # Close the connection
         processor.close()
         
         console.print(f"\n[bold green]✅ Post-processing completed successfully![/bold green]")
-        console.print(f"[cyan]Reports generated in:[/cyan] {output}")
+        if not csv_only:
+            console.print(f"[cyan]Reports generated in:[/cyan] {output}")
         
     except Exception as e:
         console.print(f"[red]❌ Post-processing failed: {e}[/red]")

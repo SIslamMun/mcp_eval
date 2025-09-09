@@ -13,6 +13,7 @@ import re
 from typing import Optional
 import re
 import hashlib
+import csv
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -1269,6 +1270,112 @@ class PostProcessor:
         
         return results
         print(f"   Output directory: {self.output_dir}")
+    
+    def export_to_csv(self, output_path: Optional[str] = None, agent_filter: Optional[str] = None) -> str:
+        """
+        Export all evaluation metrics to a comprehensive CSV file.
+        
+        Args:
+            output_path: Custom output path for CSV file. If None, uses default reports directory
+            agent_filter: Filter by agent type ('claude' or 'opencode'). If None, exports all
+            
+        Returns:
+            Path to the generated CSV file
+        """
+        print("📊 Exporting evaluation metrics to CSV...")
+        
+        # Determine output file path
+        if output_path:
+            output_file = Path(output_path)
+            if output_file.is_dir():
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"evaluation_metrics_{timestamp}.csv"
+                if agent_filter:
+                    filename = f"evaluation_metrics_{agent_filter}_{timestamp}.csv"
+                output_file = output_file / filename
+        else:
+            # Use default reports directory
+            reports_dir = Path(self.output_dir)
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"evaluation_metrics_{timestamp}.csv"
+            if agent_filter:
+                filename = f"evaluation_metrics_{agent_filter}_{timestamp}.csv"
+            output_file = reports_dir / filename
+        
+        # Extract sessions based on filter
+        if agent_filter == 'claude':
+            sessions = self.extract_claude_sessions()
+            print(f"📋 Exporting {len(sessions)} Claude sessions to CSV...")
+        elif agent_filter == 'opencode':
+            sessions = self._extract_opencode_sessions()
+            print(f"📋 Exporting {len(sessions)} OpenCode sessions to CSV...")
+        else:
+            claude_sessions = self.extract_claude_sessions()
+            opencode_sessions = self._extract_opencode_sessions()
+            sessions = claude_sessions + opencode_sessions
+            print(f"📋 Exporting {len(sessions)} total sessions ({len(claude_sessions)} Claude, {len(opencode_sessions)} OpenCode) to CSV...")
+        
+        # Process sessions and collect metrics
+        metrics_list = []
+        for i, session in enumerate(sessions, 1):
+            try:
+                # Get log content for this session
+                log_file = Path(self.output_dir) / f"{session.agent_type}_{session.session_id}_monitoring.log"
+                log_content = ""
+                if log_file.exists():
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        log_content = f.read()
+                
+                # Calculate metrics for this session
+                metrics = self.calculate_session_metrics(session, log_content, i)
+                metrics_list.append(metrics)
+                
+                print(f"   ✅ Session {i}: {session.session_id} ({session.agent_type})")
+                
+            except Exception as e:
+                print(f"   ❌ Error processing session {session.session_id}: {e}")
+                continue
+        
+        # Define CSV columns (matching evaluation_metrics.json structure)
+        csv_columns = [
+            'number', 'prompt', 'session_id', 'agent_type', 'model', 'success',
+            'execution_time', 'number_of_calls', 'number_of_tool_calls', 'tools_used',
+            'cost_usd', 'response_length', 'created_at', 'completed_at', 'logfile', 'error_message'
+        ]
+        
+        # Write CSV file
+        try:
+            with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
+                writer.writeheader()
+                
+                for metrics in metrics_list:
+                    # Convert metrics to dict and prepare for CSV
+                    row = asdict(metrics)
+                    
+                    # Handle list fields (convert to string)
+                    if row['tools_used']:
+                        row['tools_used'] = '; '.join(row['tools_used'])
+                    else:
+                        row['tools_used'] = ''
+                    
+                    # Handle None values
+                    for key, value in row.items():
+                        if value is None:
+                            row[key] = ''
+                    
+                    writer.writerow(row)
+            
+            print(f"✅ CSV export completed successfully!")
+            print(f"   📄 File: {output_file}")
+            print(f"   📊 Records: {len(metrics_list)}")
+            
+            return str(output_file)
+            
+        except Exception as e:
+            print(f"❌ Error writing CSV file: {e}")
+            raise
     
     def close(self):
         """Close InfluxDB connection."""

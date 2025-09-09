@@ -81,7 +81,33 @@ uv run python -m mcp_evaluation batch 1 2 3 --agent both --skip-permissions
 
 ## 📊 Post-Processing
 
-Process InfluxDB monitoring data and generate evaluation metrics with JSON reports.
+Process InfluxDB monitoring data and generate evaluation metrics with JSON reports and CSV exports.
+
+### CSV Export Features
+
+Export comprehensive evaluation metrics to CSV files with the same fields as `evaluation_metrics.json`:
+
+```bash
+# Generate individual session reports + CSV export
+uv run python -m mcp_evaluation post-processing --csv
+
+# Export CSV with custom path
+uv run python -m mcp_evaluation post-processing --csv --csv-path /path/to/output/
+
+# CSV-only export (skip individual session reports)
+uv run python -m mcp_evaluation post-processing --csv-only --csv-path ./exports/
+
+# Filter by agent and export CSV
+uv run python -m mcp_evaluation post-processing --agent claude --csv
+uv run python -m mcp_evaluation post-processing --agent opencode --csv-only
+```
+
+### CSV Output Structure
+
+The CSV file contains all fields from `evaluation_metrics.json`:
+- `number`, `prompt`, `session_id`, `agent_type`, `model`, `success`
+- `execution_time`, `number_of_calls`, `number_of_tool_calls`, `tools_used`
+- `cost_usd`, `response_length`, `created_at`, `completed_at`, `logfile`, `error_message`
 
 ### Key Options
 | Option | Description | Example |
